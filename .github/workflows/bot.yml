@@ -2,7 +2,7 @@ name: Relayer Autovote Hunter
 
 on:
   schedule:
-    - cron: '0 7 * * 1'  # Lunedì ore 08:00 italiane (07:00 UTC)
+    - cron: '45 6 * * 1'  # Lunedì ore 07:45 italiane (06:45 UTC)
   workflow_dispatch:      # Ti permette di avviarlo ora per test o domani a mano
 
 jobs:
