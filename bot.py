@@ -1,24 +1,28 @@
-import requests
-import time
 import os
+from eth_account import Account
 
-# Usiamo un timeout molto basso (3 secondi)
-TIMEOUT = 3 
+# Disabilitiamo i log di avviso delle librerie eth-account
+import logging
+logging.getLogger('eth_account').setLevel(logging.CRITICAL)
 
-def monitor():
-    print("🕵️ Modalità 'Fast-Fail' attiva.")
+def test_chiave():
+    # Recuperiamo la chiave privata dai segreti di GitHub
+    private_key = os.getenv("VECHAIN_PRIVATE_KEY")
+    
+    if not private_key:
+        print("❌ ERRORE: La variabile 'VECHAIN_PRIVATE_KEY' non è stata trovata o è vuota!")
+        return
+
     try:
-        # Aggiungiamo timeout=TIMEOUT
-        res = requests.get("https://mainnet.vechain.org/blocks/best", timeout=TIMEOUT)
-        if res.status_code == 200:
-            block = res.json()['number']
-            print(f"✅ Connessione ok! Blocco: {block}")
-        else:
-            print(f"❌ Errore nodo: {res.status_code}")
-    except requests.exceptions.Timeout:
-        print("⚠️ Timeout! Il nodo non risponde entro 3 secondi.")
+        # Proviamo a convertire la chiave in un account
+        account = Account.from_key(private_key)
+        print("✅ TEST RIUSCITO!")
+        print(f"🔑 Chiave privata caricata correttamente.")
+        print(f"👤 Indirizzo pubblico generato: {account.address}")
+        print("---")
+        print("Il bot è pronto a firmare transazioni con questo indirizzo.")
     except Exception as e:
-        print(f"⚠️ Errore generico: {e}")
+        print(f"❌ ERRORE: La chiave privata non è valida. Dettagli: {e}")
 
 if __name__ == "__main__":
-    monitor()
+    test_chiave()
