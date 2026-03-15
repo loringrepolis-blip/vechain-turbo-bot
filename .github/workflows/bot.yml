@@ -1,8 +1,21 @@
-name: Test di connessione
+name: Esegui VeChain Bot
 on: [workflow_dispatch]
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Stampa un saluto
-        run: echo "🚀 Il sistema funziona! GitHub sta comunicando correttamente."
+      - name: Scarica il codice
+        uses: actions/checkout@v3
+
+      - name: Installa Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Installa le dipendenze
+        run: |
+          pip install web3
+          # Aggiungi qui eventuali altre librerie che ti servono
+
+      - name: Esegui il Bot
+        run: python bot.py
