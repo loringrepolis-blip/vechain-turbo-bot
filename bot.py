@@ -1,61 +1,49 @@
-import requests
+import os
 import time
-import sys
+import requests
+from thor_requests.connect import ThorClient
+from thor_requests.wallet import Wallet
+from thor_requests.transactions import TransactionConfig
 
 # --- CONFIGURAZIONE ---
 NODE_URL = "https://mainnet.vechain.org"
 CONTRACT_ADDRESS = "0x34b56f892c9e977b9ba2e43ba64c27d368ab3c86"
 
-print(f"🚀 RELAYER ATTIVO")
-print(f"🎯 Target Contract: {CONTRACT_ADDRESS}")
-print(f"⚡ Modalità: Monitoraggio Alta Velocità\n")
+# Recupero chiave da GitHub Secrets
+PRIVATE_KEY = os.getenv("VECHAIN_PRIVATE_KEY")
 
-def check_contract_activity():
-    """
-    Verifica se ci sono stati cambiamenti recenti nell'account del contratto.
-    In un Relayer reale, qui interrogheremmo gli Event Log per 'NewProposal'.
-    """
-    url = f"{NODE_URL}/accounts/{CONTRACT_ADDRESS}"
-    try:
-        response = requests.get(url, timeout=2)
-        if response.status_code == 200:
-            return response.json()
-    except Exception as e:
-        print(f"⚠️ Errore polling contratto: {e}")
-    return None
+def main():
+    if not PRIVATE_KEY:
+        print("❌ ERRORE: Chiave privata non trovata nei Secrets di GitHub!")
+        return
 
-def monitor_and_race():
-    last_block_num = 0
+    # Inizializza il client VeChain
+    connector = ThorClient(endpoint=NODE_URL)
+    wallet = Wallet.from_private_key(PRIVATE_KEY)
     
+    print(f"🕵️ Relayer avviato.")
+    print(f"✅ Indirizzo firmatario: {wallet.address}")
+    
+    # Monitoraggio blocchi (La base del nostro ciclo di gara)
+    last_block = 0
     while True:
         try:
-            # 1. Otteniamo l'ultimo blocco (Best Block)
-            res = requests.get(f"{NODE_URL}/blocks/best", timeout=2)
+            res = requests.get(f"{NODE_URL}/blocks/best", timeout=5)
             if res.status_code == 200:
-                data = res.json()
-                current_block = data['number']
+                block_data = res.json()
+                current_block = block_data['number']
                 
-                if current_block > last_block_num:
-                    last_block_num = current_block
-                    print(f"🧱 Blocco {current_block} rilevato. Analisi snapshot...", flush=True)
+                if current_block > last_block:
+                    last_block = current_block
+                    print(f"🧱 Blocco: {current_block} - Relayer in ascolto...", flush=True)
                     
-                    # 2. CONTROLLO SNAPSHOT / PROPOSTA
-                    # Qui inseriremo la chiamata specifica per vedere se il voto è aperto.
-                    activity = check_contract_activity()
+                    # Qui aggiungeremo tra poco la logica per rilevare l'apertura del voto
                     
-                    # Se l'attività indica 'Voto Aperto':
-                    # lancia_voto_prioritario() 
+            time.sleep(1) # Polling ogni secondo
             
         except Exception as e:
-            print(f"❌ Errore di rete: {e}")
-        
-        # Intervallo di 1 secondo (limite di sicurezza per i nodi pubblici)
-        # Se usassimo un nodo dedicato, potremmo scendere a 500ms per essere ancora più veloci.
-        time.sleep(1)
+            print(f"⚠️ Errore durante il monitoraggio: {e}")
+            time.sleep(5)
 
 if __name__ == "__main__":
-    try:
-        monitor_and_race()
-    except KeyboardInterrupt:
-        print("\n🛑 Relayer fermato dall'utente.")
-        sys.exit(0)
+    main()
