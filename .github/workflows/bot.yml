@@ -1,19 +1,26 @@
-name: Esegui VeChain Bot
+name: Relayer Autovote Snapshot
 
 on:
-  workflow_dispatch:
+  schedule:
+    - cron: '0 7 * * 1'  # Scatta ogni lunedì alle 07:00 UTC (08:00 italiane)
+  workflow_dispatch:      # Ti permette di avviarlo anche a mano se serve
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout del codice
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
       - name: Installa le dipendenze
-        run: pip install requests eth-account
-      - name: Esegui il Bot
+        run: pip install web3 eth-account requests
+
+      - name: Esegui il Bot in modalità Caccia
         env:
           VECHAIN_PRIVATE_KEY: ${{ secrets.VECHAIN_PRIVATE_KEY }}
         run: python bot.py
