@@ -14,4 +14,6 @@ jobs:
       - name: Installa le dipendenze
         run: pip install requests eth-account
       - name: Esegui il Bot
+        env:
+          VECHAIN_PRIVATE_KEY: ${{ secrets.VECHAIN_PRIVATE_KEY }}
         run: python bot.py
