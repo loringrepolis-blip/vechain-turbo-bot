@@ -1,29 +1,20 @@
-import sys
-import traceback
+import time
 from web3 import Web3
 
-def run_bot():
-    print("🚀 Bot avviato su Render...")
-    
-    # Nodo pubblico ufficiale di VeChain (Mainnet)
-    rpc_url = "https://mainnet.vechain.org"
-    
-    print(f"🔗 Connessione in corso a: {rpc_url}")
-    w3 = Web3(Web3.HTTPProvider(rpc_url))
-    
-    # Verifica della connessione
-    if w3.is_connected():
-        print("✅ Connessione stabilita con successo!")
-        block_number = w3.eth.block_number
-        print(f"📦 Blocco attuale sulla blockchain VeChain: {block_number}")
-    else:
-        # Se fallisce, solleviamo un errore per vederlo nei log
-        raise Exception("❌ Impossibile connettersi al nodo VeChain.")
+# Nodo di VeChain
+rpc_url = "https://mainnet.vechain.org"
+w3 = Web3(Web3.HTTPProvider(rpc_url))
 
-if __name__ == "__main__":
+print("🚀 Bot avviato e in attesa...")
+
+# Invece di chiudersi, facciamo un loop infinito
+while True:
     try:
-        run_bot()
+        if w3.is_connected():
+            print(f"✅ Connesso! Blocco attuale: {w3.eth.block_number}")
+        else:
+            print("❌ Disconnesso, riprovo...")
     except Exception as e:
-        print("❌ ERRORE CRITICO RILEVATO:")
-        traceback.print_exc()
-        sys.exit(1) # Questo dice a Render che il bot ha avuto un problema
+        print(f"⚠️ Errore: {e}")
+        
+    time.sleep(60) # Aspetta 60 secondi prima del prossimo controllo
