@@ -1,12 +1,12 @@
-name: Relayer Autovote Snapshot
+name: Relayer Autovote Hunter
 
 on:
   schedule:
-    - cron: '0 7 * * 1'  # Scatta ogni lunedì alle 07:00 UTC (08:00 italiane)
-  workflow_dispatch:      # Ti permette di avviarlo anche a mano se serve
+    - cron: '0 7 * * 1'  # Lunedì ore 08:00 italiane (07:00 UTC)
+  workflow_dispatch:      # Ti permette di avviarlo ora per test o domani a mano
 
 jobs:
-  build:
+  run-relayer:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout del codice
@@ -20,7 +20,7 @@ jobs:
       - name: Installa le dipendenze
         run: pip install web3 eth-account requests
 
-      - name: Esegui il Bot in modalità Caccia
+      - name: Avvio Caccia allo Snapshot
         env:
           VECHAIN_PRIVATE_KEY: ${{ secrets.VECHAIN_PRIVATE_KEY }}
         run: python bot.py
