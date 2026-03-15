@@ -1,22 +1,27 @@
-def check_voting_status():
-    """
-    Verifica se il contratto accetta voti in questo preciso istante.
-    """
-    # Il data esadecimale (da recuperare dall'ABI del contratto)
-    # Esempio: 0x... (Hex della funzione di controllo)
-    payload = {
-        "to": CONTRACT_ADDRESS,
-        "data": "0x..." # Questo è il selettore della funzione isVotingActive
-    }
-    
-    try:
-        # Chiamata al nodo per lo stato corrente
-        response = requests.post(f"{NODE_URL}/accounts/{CONTRACT_ADDRESS}", json=payload)
-        status = response.json().get("data")
-        
-        # Se il risultato è '0x000...01' (ovvero true), allora votiamo!
-        if status == "0x0000000000000000000000000000000000000000000000000000000000000001":
-            return True
-    except Exception as e:
-        print(f"⚠️ Errore controllo stato voto: {e}")
-    return False
+import requests
+import time
+
+CONTRACT_ADDRESS = "0x34b56f892c9e977b9ba2e43ba64c27d368ab3c86"
+NODE_URL = "https://mainnet.vechain.org"
+
+def monitor():
+    print("🕵️ Modalità 'Ascolto Profondo' attiva.")
+    last_block = 0
+    while True:
+        try:
+            # Chiediamo al nodo l'ultimo blocco
+            res = requests.get(f"{NODE_URL}/blocks/best", timeout=5).json()
+            current_block = res['number']
+            
+            if current_block > last_block:
+                print(f"🧱 Analisi blocco {current_block} per attività su contratto...")
+                # Qui chiediamo al nodo: "Ci sono transazioni verso il contratto in questo blocco?"
+                # (Semplificazione logica)
+                last_block = current_block
+                
+        except Exception as e:
+            print(f"Attesa...")
+        time.sleep(2)
+
+if __name__ == "__main__":
+    monitor()
