@@ -1,26 +1,21 @@
-import sys
+import requests
 from web3 import Web3
 
-# Usiamo l'endpoint specifico per le chiamate RPC di VeChain
-rpc_url = "https://node.mainnet.vechain.energy"
+# Usiamo una sessione con un User-Agent "finto" per sembrare un browser
+class CustomHTTPProvider(Web3.HTTPProvider):
+    def make_request(self, method, params):
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        # Sostituiamo il metodo di richiesta standard con uno che usa 'requests'
+        response = requests.post(self.endpoint_uri, json={'jsonrpc':'2.0', 'method':method, 'params':params, 'id':1}, headers=headers)
+        return response.json()
 
-print("--- AVVIO BOT ---", flush=True)
-print(f"Tentativo di connessione a {rpc_url}...", flush=True)
+# Endpoint ufficiale
+rpc_url = "https://mainnet.vechain.org"
+w3 = Web3(CustomHTTPProvider(rpc_url))
 
-try:
-    w3 = Web3(Web3.HTTPProvider(rpc_url))
-    
-    if w3.is_connected():
-        print("✅ Connessione stabilita!", flush=True)
-        block = w3.eth.block_number
-        print(f"Blocco attuale: {block}", flush=True)
-    else:
-        print("❌ Connessione fallita: il nodo non risponde correttamente.", flush=True)
-        # Stampiamo più dettagli possibili
-        print(f"Provider: {w3.provider}", flush=True)
+print("--- TENTATIVO CON HEADER BROWSER ---")
 
-except Exception as e:
-    print(f"⚠️ Errore critico: {str(e)}", flush=True)
-    sys.exit(1)
-
-print("--- FINE ESECUZIONE ---", flush=True)
+if w3.is_connected():
+    print(f"✅ Connesso! Blocco: {w3.eth.block_number}")
+else:
+    print("❌ Ancora fallito. Il nodo sta bloccando la connessione.")
