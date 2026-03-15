@@ -1,21 +1,26 @@
 import requests
-from web3 import Web3
 
-# Usiamo una sessione con un User-Agent "finto" per sembrare un browser
-class CustomHTTPProvider(Web3.HTTPProvider):
-    def make_request(self, method, params):
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        # Sostituiamo il metodo di richiesta standard con uno che usa 'requests'
-        response = requests.post(self.endpoint_uri, json={'jsonrpc':'2.0', 'method':method, 'params':params, 'id':1}, headers=headers)
-        return response.json()
+print("--- CONNESSIONE NATIVA VECHAIN (REST API) ---", flush=True)
 
-# Endpoint ufficiale
-rpc_url = "https://mainnet.vechain.org"
-w3 = Web3(CustomHTTPProvider(rpc_url))
+# L'indirizzo ufficiale per chiedere qual è l'ultimo blocco
+url = "https://mainnet.vechain.org/blocks/best"
 
-print("--- TENTATIVO CON HEADER BROWSER ---")
+try:
+    # Facciamo la richiesta al nodo
+    response = requests.get(url, timeout=10)
+    
+    # Se il nodo risponde "OK" (codice 200)
+    if response.status_code == 200:
+        data = response.json()
+        block_number = data.get("number")
+        print(f"✅ VITTORIA! Connesso alla blockchain di VeChain.", flush=True)
+        print(f"🧱 Blocco attuale: {block_number}", flush=True)
+        print(f"⏰ Timestamp del blocco: {data.get('timestamp')}", flush=True)
+    else:
+        print(f"❌ Errore dal server. Codice: {response.status_code}", flush=True)
+        print(f"Dettaglio: {response.text}", flush=True)
 
-if w3.is_connected():
-    print(f"✅ Connesso! Blocco: {w3.eth.block_number}")
-else:
-    print("❌ Ancora fallito. Il nodo sta bloccando la connessione.")
+except Exception as e:
+    print(f"⚠️ Errore di rete: {e}", flush=True)
+
+print("--- FINE TEST ---", flush=True)
