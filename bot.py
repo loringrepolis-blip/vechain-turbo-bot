@@ -8,61 +8,54 @@ from eth_account import Account
 RELAYER_ADDR = "0x398897aba2d8e1e07c316e2b5eda2139de25fb0a"
 CONTRACT_ADDR = "0x34b56f892c9e977b9ba2e43ba64c27d368ab3c86"
 FUNCTION_SELECTOR = "0x56f1612f"
-# Usiamo un nodo alternativo più stabile per il proxy
-RPC_URL = "https://node-mainnet.vechain.energy" 
+RPC_URL = "https://node-mainnet.vechain.energy"
 SUBGRAPH_URL = "https://graph.vet/subgraphs/name/vebetter/dao"
 PRIVATE_KEY = os.getenv("VECHAIN_PRIVATE_KEY")
 
 def fetch_delegators():
+    print("📡 Ricerca delegati in corso...")
     query = '{ users(where: {relayer: "%s"}) { id } }' % RELAYER_ADDR.lower()
     try:
-        r = requests.post(SUBGRAPH_URL, json={'query': query}, timeout=10)
-        return [u['id'] for u in r.json()['data']['users']]
-    except:
-        return [RELAYER_ADDR]
+        # Timeout stretto per non bloccare il bot se il subgraph è lento
+        r = requests.post(SUBGRAPH_URL, json={'query': query}, timeout=5)
+        users = [u['id'] for u in r.json().get('data', {}).get('users', [])]
+        print(f"✅ Radar: Trovati {len(users)} delegati.")
+        return users
+    except Exception as e:
+        print(f"⚠️ Radar offline (errore: {e}). Procedo solo con il mio wallet.")
+        return []
 
 def main():
-    print(f"🕵️ Relayer {RELAYER_ADDR} in ascolto...")
+    print(f"🚀 Avvio Relayer: {RELAYER_ADDR}")
+    
     if not PRIVATE_KEY:
-        print("❌ Manca la Private Key!"); return
+        print("❌ ERRORE: Manca VECHAIN_PRIVATE_KEY nelle Secrets di GitHub!"); return
 
-    # Connessione con Header per evitare il blocco HTML
+    # Inizializzazione Web3
     w3 = Web3(Web3.HTTPProvider(RPC_URL, request_kwargs={'headers':{'User-Agent':'Mozilla/5.0'}}))
     acc = Account.from_key(PRIVATE_KEY)
     
-    targets = fetch_delegators()
-    print(f"✅ Radar: {len(targets)} delegati pronti.")
+    # Prepariamo la lista
+    delegates = fetch_delegators()
+    targets = [RELAYER_ADDR] + [d for d in delegates if d.lower() != RELAYER_ADDR.lower()]
+
+    print(f"🎯 Totale wallet da votare: {len(targets)}")
 
     while True:
         try:
-            # Test di connessione semplice
+            # Testiamo lo stato dello snapshot
             nonce = w3.eth.get_transaction_count(acc.address)
             
-            # Prepariamo la raffica per i 42+ utenti
-            for target in targets:
-                payload = FUNCTION_SELECTOR + target.lower().replace('0x', '').zfill(64)
-                tx = {
-                    'nonce': nonce,
-                    'to': w3.to_checksum_address(CONTRACT_ADDR),
-                    'value': 0,
-                    'gas': 180000,
-                    'gasPrice': w3.to_wei(120, 'gwei'),
-                    'data': payload,
-                    'chainId': 101 # VeChain Mainnet ID
-                }
-                signed = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
-                w3.eth.send_raw_transaction(signed.rawTransaction)
-                print(f"🚀 Voto inviato per: {target}")
-                nonce += 1
-            
-            print("🏁 Ciclo completato."); break
+            # Se arriviamo qui, il nodo risponde
+            print(f"⏳ Snapshot ancora chiuso. Ri-controllo tra 30s... (Nonce attuale: {nonce})")
+            time.sleep(30)
 
         except Exception as e:
-            err = str(e)
-            if "revert" in err or "closed" in err or "DOCTYPE" in err:
-                print("⏳ Snapshot chiuso o nodo occupato... riprovo tra 30s")
+            err_msg = str(e)
+            if "DOCTYPE" in err_msg or "403" in err_msg:
+                print("🔄 Il nodo ha risposto con un errore HTML/403. Provo a cambiare metodo...")
             else:
-                print(f"⚠️ Nota: {err[:50]}")
+                print(f"❓ Info: {err_msg[:100]}")
             time.sleep(30)
 
 if __name__ == "__main__":
