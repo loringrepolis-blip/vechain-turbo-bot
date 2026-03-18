@@ -9,31 +9,13 @@ RELAYER_ADDR = "0x398897aba2d8e1e07c316e2b5eda2139de25fb0a"
 CONTRACT_ADDR = "0x34b56f892c9e977b9ba2e43ba64c27d368ab3c86"
 FUNCTION_SELECTOR = "0x56f1612f" # castVote(address)
 
-# Lista nodi per ridondanza (Anti-Ban)
-NODES = [
-    "https://mainnet.vechain.org",
-    "https://node-mainnet.vechain.energy",
-    "https://mainnet.veblocks.net"
-]
+# Usa SOLO l'endpoint Proxy EVM compatibile per Web3.py
+RPC_URL = "https://rpc-mainnet.vechain.energy"
 
 # Endpoint per il Radar (Subgraph VeBetterDAO)
 SUBGRAPH_URL = "https://graph.vet/subgraphs/name/vebetter/dao"
 
 PRIVATE_KEY = os.getenv("VECHAIN_PRIVATE_KEY")
-
-def get_web3():
-    """Ruota tra i nodi se uno fallisce, con travestimento anti-blocco"""
-    for url in NODES:
-        try:
-            # Abbiamo rimesso l'User-Agent per ingannare i firewall!
-            w3 = Web3(Web3.HTTPProvider(url, request_kwargs={'headers': {'User-Agent': 'Mozilla/5.0'}, 'timeout': 10}))
-            if w3.is_connected(): 
-                print(f"🔗 Connesso con successo al nodo: {url}")
-                return w3
-        except Exception as e: 
-            print(f"⚠️ Nodo {url} non risponde.")
-            continue
-    return None
 
 def fetch_delegators():
     """RADAR: Chiede al Subgraph chi ha delegato a questo Relayer"""
@@ -62,12 +44,17 @@ def main():
         print("❌ ERRORE CRITICO: VECHAIN_PRIVATE_KEY non trovata su GitHub!")
         return
         
-    # Check 2: Riusciamo a connetterci?
-    w3 = get_web3()
-    if not w3:
-        print("❌ ERRORE CRITICO: Nessun nodo VeChain è raggiungibile.")
+    # Check 2: Connessione al Proxy EVM
+    try:
+        w3 = Web3(Web3.HTTPProvider(RPC_URL, request_kwargs={'headers': {'User-Agent': 'Mozilla/5.0'}, 'timeout': 15}))
+        if not w3.is_connected():
+            print("❌ ERRORE CRITICO: Impossibile connettersi al proxy RPC di VeChain.")
+            return
+    except Exception as e:
+        print(f"❌ ERRORE CRITICO: Eccezione nella connessione al nodo: {e}")
         return
-
+        
+    print("🔗 Connesso con successo a VeChain (Proxy EVM)!")
     acc = Account.from_key(PRIVATE_KEY)
     
     # Recupera la lista automatica
@@ -89,7 +76,7 @@ def main():
                 'gas': 180000,
                 'gasPrice': w3.to_wei(150, 'gwei'),
                 'data': payload,
-                'chainId': 101
+                'chainId': 100009 # ID ufficiale VeChain Mainnet
             }
 
             signed = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
@@ -113,17 +100,12 @@ def main():
             error_msg = str(e)
             if "revert" in error_msg or "closed" in error_msg:
                 print("⏳ Snapshot chiuso... riprovo tra 30s")
-            elif "403" in error_msg or "<!DOCTYPE html>" in error_msg:
-                print("🔄 Nodo bloccato. Ruoto connessione...")
-                w3 = get_web3()
+            elif "403" in error_msg:
+                print("🔄 Nodo bloccato dal firewall (403).")
             else:
                 print(f"❓ Info attesa: {error_msg[:60]}...")
             
-            # Ferma il bot se stiamo solo facendo un test manuale per non consumare i minuti di GitHub
-            # (Rimuovi questo break se vuoi che giri all'infinito, ma su GitHub Actions va bene tenerlo per i test)
-            break 
-            
-            # time.sleep(30) # Disattivato per questo test
+            time.sleep(30)
 
 if __name__ == "__main__":
     main()
