@@ -9,11 +9,9 @@ RELAYER_ADDR = "0x398897aba2d8e1e07c316e2b5eda2139de25fb0a"
 CONTRACT_ADDR = "0x34b56f892c9e977b9ba2e43ba64c27d368ab3c86"
 FUNCTION_SELECTOR = "0x56f1612f"
 
-# Lista di nodi per evitare il "Nodo occupato"
 NODES = [
     "https://rpc-mainnet.vechain.energy",
-    "https://mainnet.veblocks.net",
-    "https://node-mainnet.vechain.energy"
+    "https://mainnet.veblocks.net"
 ]
 
 SUBGRAPH_URL = "https://graph.vet/subgraphs/name/vebetter/dao"
@@ -21,71 +19,74 @@ PRIVATE_KEY = os.getenv("VECHAIN_PRIVATE_KEY")
 
 def fetch_delegators():
     print("📡 Fase 1: Ricerca delegati nel Radar...")
-    # Proviamo la query con indirizzo sia minuscolo che standard
+    # Proviamo sia minuscolo che checksummed per sicurezza
+    addr_low = RELAYER_ADDR.lower()
+    addr_check = Web3.to_checksum_address(RELAYER_ADDR)
+    
     query = """
     {
-      users(where: {relayer: "%s"}) {
+      users(where: {relayer_in: ["%s", "%s"]}) {
         id
       }
     }
-    """ % RELAYER_ADDR.lower()
+    """ % (addr_low, addr_check)
     
     try:
         r = requests.post(SUBGRAPH_URL, json={'query': query}, timeout=15)
         data = r.json()
         users = [u['id'] for u in data.get('data', {}).get('users', [])]
         
-        # Se ancora 0, proviamo senza filtro per debug interno
         if not users:
-            print("⚠️ Nessun delegato trovato con filtro diretto. Controllo fallback...")
-            
+            # --- PIANO B: SE IL RADAR È VUOTO, AGGIUNGI QUI GLI INDIRIZZI A MANO ---
+            # Se vuoi essere sicuro per lunedì, puoi incollarli qui dentro così:
+            # users = ["0xIndirizzo1", "0xIndirizzo2"]
+            print("⚠️ Il Radar automatico non risponde correttamente.")
+        
         return users
     except Exception as e:
         print(f"⚠️ Errore Radar: {e}")
         return []
 
 def get_working_w3():
-    """Tenta di connettersi a uno dei nodi disponibili"""
     for url in NODES:
         try:
             w3 = Web3(Web3.HTTPProvider(url, request_kwargs={'headers':{'User-Agent':'Mozilla/5.0'}, 'timeout': 10}))
             if w3.is_connected():
-                print(f"🔗 Connesso a: {url}")
                 return w3
         except:
             continue
     return None
 
 def main():
-    print(f"🚀 Avvio Relayer Engine per: {RELAYER_ADDR}")
-    
+    print(f"🚀 Relayer Engine Online: {RELAYER_ADDR}")
     if not PRIVATE_KEY:
         print("❌ Manca la Key!"); return
 
     w3 = get_working_w3()
     if not w3:
-        print("❌ Nessun nodo raggiungibile. GitHub è bloccato."); return
+        print("❌ Rete non raggiungibile."); return
 
     acc = Account.from_key(PRIVATE_KEY)
     
-    # Radar
+    # Recupero delegati
     delegates = fetch_delegators()
-    targets = list(set([RELAYER_ADDR.lower()] + [d.lower() for d in delegates]))
+    # Costruiamo la lista finale: prima TU, poi i delegati
+    targets = [RELAYER_ADDR.lower()]
+    for d in delegates:
+        if d.lower() != RELAYER_ADDR.lower():
+            targets.append(d.lower())
     
-    print(f"🎯 Pronti a votare per {len(targets)} wallet.")
+    print(f"✅ Configurazione completata. Target pronti: {len(targets)}")
 
     while True:
         try:
-            # Refresh connessione se necessario
-            if not w3.is_connected():
-                w3 = get_working_w3()
-
+            # Controllo connessione e Nonce (per vedere se il bot è vivo)
             nonce = w3.eth.get_transaction_count(acc.address)
-            print(f"⏳ Snapshot chiuso. (Nonce: {nonce}) - Radar attivo su {len(targets)} utenti. Riprovo...")
-            time.sleep(60) # Aumentato a 60s per evitare ban dal nodo
+            print(f"⏳ Snapshot CHIUSO. (Nonce: {nonce}) - Monitoraggio {len(targets)} wallet... riprovo tra 60s")
+            time.sleep(60)
 
         except Exception as e:
-            print(f"🔄 Nodo momentaneamente instabile. Cambio rotta... ({str(e)[:50]})")
+            print(f"🔄 Nodo instabile, ricollego... ({str(e)[:40]})")
             w3 = get_working_w3()
             time.sleep(30)
 
