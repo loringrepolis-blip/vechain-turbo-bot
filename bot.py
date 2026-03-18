@@ -1,66 +1,117 @@
 import os
 import time
+import requests
 from web3 import Web3
 from eth_account import Account
 
-# --- CONFIGURAZIONE ---
-# Usiamo il nodo pubblico ufficiale di VeChain (non blocca i bot)
-RPC_URL = "https://mainnet.vechain.org"
-CONTRACT_ADDRESS = "0x34b56f892c9e977b9ba2e43ba64c27d368ab3c86"
-FUNCTION_SELECTOR = "0x56f1612f"
+# --- CONFIGURAZIONE CORE ---
+RELAYER_ADDR = "0x398897aba2d8e1e07c316e2b5eda2139de25fb0a"
+CONTRACT_ADDR = "0x34b56f892c9e977b9ba2e43ba64c27d368ab3c86"
+FUNCTION_SELECTOR = "0x56f1612f" # castVote(address)
 
-# Il tuo wallet
-TARGET_WALLETS = [
-    "0x398897Aba2D8E1e07C316E2b5EdA2139DE25Fb0a", 
+# Lista nodi per ridondanza (Anti-Ban)
+NODES = [
+    "https://mainnet.vechain.org",
+    "https://node-mainnet.vechain.energy",
+    "https://mainnet.veblocks.net"
 ]
 
-web3 = Web3(Web3.HTTPProvider(RPC_URL))
+# Endpoint per il Radar (Subgraph VeBetterDAO)
+SUBGRAPH_URL = "https://graph.vet/subgraphs/name/vebetter/dao"
+
 PRIVATE_KEY = os.getenv("VECHAIN_PRIVATE_KEY")
 
-def genera_payload(wallet_address):
-    clean_address = wallet_address.lower().replace('0x', '')
-    return FUNCTION_SELECTOR + clean_address.zfill(64)
+def get_web3():
+    """Ruota tra i nodi se uno fallisce"""
+    for url in NODES:
+        try:
+            w3 = Web3(Web3.HTTPProvider(url, request_kwargs={'timeout': 10}))
+            if w3.is_connected(): return w3
+        except: continue
+    return None
 
-def invia_voto(wallet_target, account, nonce):
-    payload = genera_payload(wallet_target)
-    tx = {
-        'nonce': nonce,
-        'to': web3.to_checksum_address(CONTRACT_ADDRESS),
-        'value': 0,
-        'gas': 160000,
-        'gasPrice': web3.to_wei(120, 'gwei'),
-        'data': payload,
-        'chainId': web3.eth.chain_id
+def fetch_delegators():
+    """RADAR: Chiede al Subgraph chi ha delegato a questo Relayer"""
+    query = """
+    {
+      users(where: {relayer: "%s"}) {
+        id
+      }
     }
-    signed_tx = web3.eth.account.sign_transaction(tx, PRIVATE_KEY)
-    tx_hash = web3.eth.send_raw_transaction(signed_tx.rawTransaction)
-    return web3.to_hex(tx_hash)
+    """ % RELAYER_ADDR.lower()
+    
+    try:
+        response = requests.post(SUBGRAPH_URL, json={'query': query})
+        data = response.json()
+        # Estrae gli indirizzi dalla risposta
+        delegators = [u['id'] for u in data['data']['users']]
+        return delegators
+    except Exception as e:
+        print(f"⚠️ Errore Radar: {e}. Uso solo il mio wallet.")
+        return [RELAYER_ADDR]
 
 def main():
-    print("🛠️ Avvio sistema...", flush=True)
-    if not PRIVATE_KEY:
-        print("❌ ERRORE: Chiave privata non trovata!", flush=True)
+    print(f"📡 RADAR ATTIVATO per Relayer: {RELAYER_ADDR}")
+    w3 = get_web3()
+    if not w3 or not PRIVATE_KEY:
+        print("❌ Errore configurazione (Nodo o Private Key).")
         return
 
-    account = Account.from_key(PRIVATE_KEY)
-    print(f"🕵️ Relayer {account.address} in ascolto...", flush=True)
+    acc = Account.from_key(PRIVATE_KEY)
     
-    tentativi = 0
-    mentre_aspettiamo = True
+    # 1. Recupera la lista automatica (i tuoi 42 utenti + nuovi)
+    targets = fetch_delegators()
+    if RELAYER_ADDR.lower() not in targets:
+        targets.insert(0, RELAYER_ADDR) # Aggiungi te stesso se non in lista
+    
+    print(f"✅ Trovati {len(targets)} wallet deleganti. Inizio monitoraggio...")
 
-    while mentre_aspettiamo:
-        tentativi += 1
+    while True:
         try:
-            nonce = web3.eth.get_transaction_count(account.address)
-            print(f"🔄 Tentativo {tentativi} in corso...", flush=True)
+            # Controllo rapido: prova a inviare il primo voto
+            nonce = w3.eth.get_transaction_count(acc.address)
             
-            tx_hash = invia_voto(TARGET_WALLETS[0], account, nonce)
+            # Prepariamo il payload per il primo target
+            payload = FUNCTION_SELECTOR + targets[0].lower().replace('0x', '').zfill(64)
             
-            print(f"🚀 BERSAGLIO COLPITO! Voto inviato: {tx_hash}", flush=True)
-            mentre_aspettiamo = False 
+            tx = {
+                'nonce': nonce,
+                'to': w3.to_checksum_address(CONTRACT_ADDR),
+                'value': 0,
+                'gas': 180000,
+                'gasPrice': w3.to_wei(150, 'gwei'), # Gas aggressivo per priorità
+                'data': payload,
+                'chainId': 101
+            }
+
+            signed = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
+            tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
+            
+            print(f"🎯 SNAPSHOT APERTO! Voto inviato per {targets[0]}: {w3.to_hex(tx_hash)}")
+
+            # Se il primo va a buon fine, spara a raffica per tutti gli altri
+            for i in range(1, len(targets)):
+                nonce += 1
+                payload = FUNCTION_SELECTOR + targets[i].lower().replace('0x', '').zfill(64)
+                tx['nonce'] = nonce
+                tx['data'] = payload
+                signed = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
+                w3.eth.send_raw_transaction(signed.rawTransaction)
+                print(f"🚀 Voto automatico inviato per delegante: {targets[i]}")
+            
+            print("🏁 Operazione conclusa con successo!")
+            break
 
         except Exception as e:
-            print(f"⏳ Errore o Snapshot chiuso: {str(e)[:60]}... Riprovo tra 30s", flush=True)
+            error_msg = str(e)
+            if "revert" in error_msg or "closed" in error_msg:
+                print("⏳ Snapshot chiuso... riprovo tra 30s")
+            elif "403" in error_msg:
+                print("🔄 Nodo bloccato. Ruoto connessione...")
+                w3 = get_web3()
+            else:
+                print(f"❓ Info: {error_msg[:60]}...")
+            
             time.sleep(30)
 
 if __name__ == "__main__":
