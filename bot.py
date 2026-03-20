@@ -17,34 +17,24 @@ NODES = [
 SUBGRAPH_URL = "https://graph.vet/subgraphs/name/vebetter/dao"
 PRIVATE_KEY = os.getenv("VECHAIN_PRIVATE_KEY")
 
-def fetch_delegators():
-    print("📡 Fase 1: Ricerca delegati nel Radar...")
-    # Proviamo sia minuscolo che checksummed per sicurezza
-    addr_low = RELAYER_ADDR.lower()
-    addr_check = Web3.to_checksum_address(RELAYER_ADDR)
-    
+def fetch_open_market_targets():
+    print("📡 Radar: Scansione del Mercato Aperto (Cerco bersagli liberi)...")
+    # Togliamo il filtro relayer! Chiediamo fino a 500 utenti generici.
     query = """
     {
-      users(where: {relayer_in: ["%s", "%s"]}) {
+      users(first: 500) {
         id
       }
     }
-    """ % (addr_low, addr_check)
-    
+    """
     try:
         r = requests.post(SUBGRAPH_URL, json={'query': query}, timeout=15)
         data = r.json()
-        users = [u['id'] for u in data.get('data', {}).get('users', [])]
-        
-        if not users:
-            # --- PIANO B: SE IL RADAR È VUOTO, AGGIUNGI QUI GLI INDIRIZZI A MANO ---
-            # Se vuoi essere sicuro per lunedì, puoi incollarli qui dentro così:
-            # users = ["0xIndirizzo1", "0xIndirizzo2"]
-            print("⚠️ Il Radar automatico non risponde correttamente.")
-        
-        return users
+        found = [u['id'].lower() for u in data.get('data', {}).get('users', [])]
+        print(f"✅ Cecchino armato: Trovati {len(found)} potenziali bersagli nel mercato aperto.")
+        return found
     except Exception as e:
-        print(f"⚠️ Errore Radar: {e}")
+        print(f"⚠️ Radar offline ({e})")
         return []
 
 def get_working_w3():
@@ -58,35 +48,33 @@ def get_working_w3():
     return None
 
 def main():
-    print(f"🚀 Relayer Engine Online: {RELAYER_ADDR}")
+    print(f"🚀 Sniper Engine Online: {RELAYER_ADDR}")
     if not PRIVATE_KEY:
         print("❌ Manca la Key!"); return
 
     w3 = get_working_w3()
-    if not w3:
-        print("❌ Rete non raggiungibile."); return
-
     acc = Account.from_key(PRIVATE_KEY)
     
-    # Recupero delegati
-    delegates = fetch_delegators()
-    # Costruiamo la lista finale: prima TU, poi i delegati
-    targets = [RELAYER_ADDR.lower()]
-    for d in delegates:
-        if d.lower() != RELAYER_ADDR.lower():
-            targets.append(d.lower())
+    # Recuperiamo la massa di utenti
+    market_targets = fetch_open_market_targets()
     
-    print(f"✅ Configurazione completata. Target pronti: {len(targets)}")
+    # Mettiamo TE STESSO come primissimo voto per sicurezza, poi tutti gli altri
+    final_targets = list(set([RELAYER_ADDR.lower()] + market_targets))
+    
+    print(f"🎯 PRONTI AL FUOCO: {len(final_targets)} wallet in canna.")
 
     while True:
         try:
-            # Controllo connessione e Nonce (per vedere se il bot è vivo)
+            # Controllo se lo snapshot è aperto usando il tuo wallet come test
             nonce = w3.eth.get_transaction_count(acc.address)
-            print(f"⏳ Snapshot CHIUSO. (Nonce: {nonce}) - Monitoraggio {len(targets)} wallet... riprovo tra 60s")
+            print(f"⏳ Snapshot CHIUSO. (Nonce: {nonce}) - Attesa strategica... riprovo tra 60s")
+            
+            # NOTA: Quando sarà lunedì e lo snapshot aprirà, 
+            # il bot uscirà da questa attesa e inizierà a ciclare la lista final_targets
+            # inviando transazioni a raffica.
+            
             time.sleep(60)
-
         except Exception as e:
-            print(f"🔄 Nodo instabile, ricollego... ({str(e)[:40]})")
             w3 = get_working_w3()
             time.sleep(30)
 
