@@ -12,54 +12,63 @@ BATCH_SIZE = 100
 
 NODE_URL = "https://rpc-mainnet.vechain.energy"
 SUBGRAPH_URL = "https://graph.vet/subgraphs/name/vebetter/dao"
-
-# Recuperiamo la chiave dai Secrets
 RAW_KEY = os.getenv("VECHAIN_PRIVATE_KEY", "").strip()
 
 def fetch_targets():
     """Radar: Recupera i 1000 bersagli"""
+    print("📡 Radar: Scansione in corso per 1000 bersagli...", flush=True)
     query = '{ accounts(first: 1000, orderBy: id, orderDirection: desc) { id } }'
     try:
         r = requests.post(SUBGRAPH_URL, json={'query': query}, timeout=15)
-        return [u['id'] for u in r.json()['data']['accounts']]
-    except: return []
+        data = r.json()
+        if 'data' in data and 'accounts' in data['data']:
+            return [u['id'] for u in data['data']['accounts']]
+        return []
+    except Exception as e:
+        print(f"❌ Errore Radar: {e}", flush=True)
+        return []
 
 def is_snapshot_open(connector):
-    """Sensore: Verifica apertura Snapshot"""
+    """Sensore: Verifica apertura Snapshot tramite simulazione"""
     try:
         test_data = FUNCTION_SELECTOR + RELAYER_ADDR.lower().replace('0x', '').rjust(64, '0')
         connector.call(RELAYER_ADDR, CONTRACT_ADDR, test_data)
         return True
-    except: return False
+    except:
+        return False
 
 def main():
-    print(f"🚀 SNIPER GATLING V2.5 | Relayer: {RELAYER_ADDR}")
+    print(f"🚀 SNIPER GATLING V2.6 (Real-Time) | Relayer: {RELAYER_ADDR}", flush=True)
     
-    # Pulizia tecnica della chiave per thor-requests
-    clean_key = RAW_KEY
-    if clean_key.startswith("0x"):
-        clean_key = clean_key[2:]
+    # Pulizia e validazione chiave
+    clean_key = RAW_KEY[2:] if RAW_KEY.startswith("0x") else RAW_KEY
     
     if not clean_key or len(clean_key) != 64:
-        print(f"❌ ERRORE: La chiave deve essere di 64 caratteri (esadecimale). Rilevati: {len(clean_key)}")
+        print(f"❌ ERRORE CHIAVE: Lunghezza non valida ({len(clean_key)})", flush=True)
         return
 
     try:
         connector = Connect(NODE_URL)
-        # TRADUZIONE: Trasformiamo la stringa esadecimale in bytes (32 bytes)
         wallet = Wallet(bytes.fromhex(clean_key)) 
-        print("✅ Chiave Privata caricata e convertita correttamente.")
+        print("✅ Chiave caricata e convertita correttamente.", flush=True)
     except Exception as e:
-        print(f"❌ Errore durante il caricamento del Wallet: {e}")
+        print(f"❌ Errore caricamento Wallet: {e}", flush=True)
         return
 
+    # Caricamento munizioni
     targets = fetch_targets()
-    print(f"🎯 Caricatore: {len(targets)} wallet pronti.")
+    if not targets:
+        print("❌ Nessun bersaglio trovato. Riprovo tra 10s...", flush=True)
+        time.sleep(10)
+        return main() # Riprova il caricamento
+    
+    print(f"🎯 Caricatore: {len(targets)} wallet pronti.", flush=True)
 
+    # Ciclo di guardia
     while True:
         try:
             if is_snapshot_open(connector):
-                print("🟢 APERTO! Inizio Fuoco!")
+                print("🟢 SEGNALE VERDE: Snapshot APERTO! Inizio Fuoco!", flush=True)
                 for i in range(0, len(targets), BATCH_SIZE):
                     batch = targets[i:i + BATCH_SIZE]
                     clauses = []
@@ -68,16 +77,18 @@ def main():
                         clauses.append({"to": CONTRACT_ADDR, "value": 0, "data": data})
                     
                     res = connector.send_transaction(wallet, clauses)
-                    print(f"🚀 Batch {i//BATCH_SIZE + 1} inviato! | TxID: {res['id']}")
+                    print(f"🚀 Batch {i//BATCH_SIZE + 1} inviato! | TxID: {res['id']}", flush=True)
                     time.sleep(1.5)
                 
-                print("\n✅ MISSIONE COMPIUTA!")
+                print("\n✅ MISSIONE COMPIUTA: Tutti i batch completati!", flush=True)
                 break
             else:
-                print(f"⏳ CHIUSO | In attesa... (30s)")
+                # Stampa lo stato ogni 30 secondi per rassicurare che il bot è vivo
+                current_time = time.strftime("%H:%M:%S", time.localtime())
+                print(f"⏳ [{current_time}] Snapshot CHIUSO | Sentinella in attesa...", flush=True)
                 time.sleep(30)
         except Exception as e:
-            print(f"🔄 Errore: {e}. Riprovo...")
+            print(f"🔄 Errore durante il monitoraggio: {e}. Riprovo...", flush=True)
             time.sleep(30)
 
 if __name__ == "__main__":
