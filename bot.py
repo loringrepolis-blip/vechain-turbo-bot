@@ -12,47 +12,48 @@ BATCH_SIZE = 100
 
 NODE_URL = "https://rpc-mainnet.vechain.energy"
 SUBGRAPH_URL = "https://graph.vet/subgraphs/name/vebetter/dao"
-PRIVATE_KEY = os.getenv("VECHAIN_PRIVATE_KEY")
+
+# Recuperiamo la chiave dai Secrets
+RAW_KEY = os.getenv("VECHAIN_PRIVATE_KEY", "").strip()
 
 def fetch_targets():
-    """Radar: Recupera i 1000 bersagli più attivi"""
-    print("📡 Radar: Scansione in corso per 1000 bersagli...")
+    """Radar: Recupera i 1000 bersagli"""
     query = '{ accounts(first: 1000, orderBy: id, orderDirection: desc) { id } }'
     try:
         r = requests.post(SUBGRAPH_URL, json={'query': query}, timeout=15)
-        data = r.json()
-        if 'data' in data and 'accounts' in data['data']:
-            return [u['id'] for u in data['data']['accounts']]
-        return []
-    except Exception as e:
-        print(f"❌ Errore Radar: {e}")
-        return []
+        return [u['id'] for u in r.json()['data']['accounts']]
+    except: return []
 
 def is_snapshot_open(connector):
-    """Sensore: Controlla se lo snapshot è aperto"""
+    """Sensore: Verifica apertura Snapshot"""
     try:
         test_data = FUNCTION_SELECTOR + RELAYER_ADDR.lower().replace('0x', '').rjust(64, '0')
         connector.call(RELAYER_ADDR, CONTRACT_ADDR, test_data)
         return True
-    except:
-        return False
+    except: return False
 
 def main():
-    print(f"🚀 SNIPER GATLING V2.3 | Relayer: {RELAYER_ADDR}")
-    if not PRIVATE_KEY:
-        print("❌ ERRORE: Chiave Privata mancante!"); return
+    print(f"🚀 SNIPER GATLING V2.5 | Relayer: {RELAYER_ADDR}")
+    
+    # Pulizia tecnica della chiave per thor-requests
+    clean_key = RAW_KEY
+    if clean_key.startswith("0x"):
+        clean_key = clean_key[2:]
+    
+    if not clean_key or len(clean_key) != 64:
+        print(f"❌ ERRORE: La chiave deve essere di 64 caratteri (esadecimale). Rilevati: {len(clean_key)}")
+        return
 
-    connector = Connect(NODE_URL)
-    
-    # --- CORREZIONE QUI ---
-    # In questa versione della libreria, Wallet si inizializza passando la chiave
-    wallet = Wallet(PRIVATE_KEY) 
-    # ----------------------
-    
+    try:
+        connector = Connect(NODE_URL)
+        # TRADUZIONE: Trasformiamo la stringa esadecimale in bytes (32 bytes)
+        wallet = Wallet(bytes.fromhex(clean_key)) 
+        print("✅ Chiave Privata caricata e convertita correttamente.")
+    except Exception as e:
+        print(f"❌ Errore durante il caricamento del Wallet: {e}")
+        return
+
     targets = fetch_targets()
-    if not targets:
-        print("❌ Nessun bersaglio trovato."); return
-    
     print(f"🎯 Caricatore: {len(targets)} wallet pronti.")
 
     while True:
@@ -73,10 +74,10 @@ def main():
                 print("\n✅ MISSIONE COMPIUTA!")
                 break
             else:
-                print(f"⏳ CHIUSO | In attesa... (Controllo ogni 30s)")
+                print(f"⏳ CHIUSO | In attesa... (30s)")
                 time.sleep(30)
         except Exception as e:
-            print(f"🔄 Errore connessione o esecuzione: {e}. Riprovo...")
+            print(f"🔄 Errore: {e}. Riprovo...")
             time.sleep(30)
 
 if __name__ == "__main__":
