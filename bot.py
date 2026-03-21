@@ -29,24 +29,16 @@ SUBGRAPH_URL = "https://graph.vet/subgraphs/name/vebetter/dao"
 PRIVATE_KEY = os.getenv("VECHAIN_PRIVATE_KEY")
 
 def fetch_open_market():
-    """Interroga il Subgraph usando il campo corretto 'accounts'"""
-    print("📡 Radar: Scansione Mercato Aperto (Ricerca 'accounts')...")
-    query = '{ accounts(first: 500) { id } }'
+    """Versione potenziata: 1000 bersagli per chiamata"""
+    print("📡 Radar: Scansione ad alta potenza (1000 target)...")
+    query = '{ accounts(first: 1000, orderBy: id, orderDirection: desc) { id } }'
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         r = requests.post(SUBGRAPH_URL, json={'query': query}, headers=headers, timeout=15)
         data = r.json()
-        
-        if 'errors' in data:
-            print(f"❌ DEBUG RADAR (Errore): {data['errors'][0].get('message')}")
-            return []
-            
-        found = [u['id'].lower() for u in data.get('data', {}).get('accounts', [])]
-        print(f"✅ Radar: Agganciati {len(found)} nuovi bersagli dal database!")
-        return found
-    except Exception as e:
-        print(f"⚠️ Radar offline ({e})")
-        return []
+        if 'errors' in data: return []
+        return [u['id'].lower() for u in data.get('data', {}).get('accounts', [])]
+    except: return []
 
 def get_working_w3():
     for url in NODES:
@@ -57,25 +49,22 @@ def get_working_w3():
     return None
 
 def main():
-    print(f"🚀 Sniper Engine Online | Relayer: {RELAYER_ADDR}")
-    if not PRIVATE_KEY:
-        print("❌ ERRORE: Chiave Privata non trovata!"); return
-
+    print(f"🚀 Sniper Online | Relayer: {RELAYER_ADDR}")
     w3 = get_working_w3()
     acc = Account.from_key(PRIVATE_KEY)
     
-    # Radar sbloccato + 22 vecchi (23 meno te stesso) + Te stesso
+    # Caricamento munizioni
     market_targets = fetch_open_market()
     final_targets = list(set([RELAYER_ADDR.lower()] + [t.lower() for t in MANUAL_TARGETS] + market_targets))
     
-    print(f"🎯 STATO CARICATORE: {len(final_targets)} wallet pronti per lo snapshot.")
+    print(f"🎯 STATO CARICATORE: {len(final_targets)} wallet pronti.")
 
     while True:
         try:
             nonce = w3.eth.get_transaction_count(acc.address)
             print(f"⏳ Snapshot CHIUSO | Nonce: {nonce} | Bersagli: {len(final_targets)} | Riprovo tra 60s")
             time.sleep(60)
-        except Exception as e:
+        except:
             w3 = get_working_w3()
             time.sleep(30)
 
