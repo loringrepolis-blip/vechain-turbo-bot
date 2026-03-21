@@ -29,7 +29,7 @@ SUBGRAPH_URL = "https://graph.vet/subgraphs/name/vebetter/dao"
 PRIVATE_KEY = os.getenv("VECHAIN_PRIVATE_KEY")
 
 def fetch_open_market():
-    """Versione potenziata: 1000 bersagli per chiamata"""
+    """Recupera fino a 1000 bersagli attivi"""
     print("📡 Radar: Scansione ad alta potenza (1000 target)...")
     query = '{ accounts(first: 1000, orderBy: id, orderDirection: desc) { id } }'
     try:
@@ -48,23 +48,80 @@ def get_working_w3():
         except: continue
     return None
 
+def is_snapshot_open(w3, acc, test_target):
+    """Il 'Sensore': simula una transazione per vedere se la DAO accetta voti"""
+    clean_target = test_target.lower().replace('0x', '').rjust(64, '0')
+    tx = {
+        'to': Web3.to_checksum_address(CONTRACT_ADDR),
+        'from': acc.address,
+        'data': FUNCTION_SELECTOR + clean_target
+    }
+    try:
+        w3.eth.call(tx) # Se passa senza errori, siamo APERTI
+        return True
+    except:
+        return False # Se restituisce errore, siamo CHIUSI
+
+def fire_volley(w3, acc, targets):
+    """Il 'Grilletto': spara i voti in sequenza"""
+    print(f"\n🔥 GRILLETTO PREMUTO! Inizio raffica su {len(targets)} bersagli...")
+    nonce = w3.eth.get_transaction_count(acc.address)
+    gas_price = w3.eth.gas_price
+    success_count = 0
+    
+    for i, target in enumerate(targets):
+        try:
+            clean_target = target.lower().replace('0x', '').rjust(64, '0')
+            tx = {
+                'chainId': w3.eth.chain_id,
+                'nonce': nonce,
+                'to': Web3.to_checksum_address(CONTRACT_ADDR),
+                'data': FUNCTION_SELECTOR + clean_target,
+                'gas': 100000, # Copertura di sicurezza per il voto
+                'gasPrice': gas_price
+            }
+            
+            signed_tx = acc.sign_transaction(tx)
+            tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+            
+            print(f"[{i+1}/{len(targets)}] 🎯 Colpito: {target} | TxID: {tx_hash.hex()}")
+            nonce += 1
+            success_count += 1
+            time.sleep(0.3) # Pausa strategica per non far arrabbiare il nodo (Anti-DDoS)
+            
+        except Exception as e:
+            print(f"[{i+1}/{len(targets)}] ❌ Fallito su {target}: Errore di connessione o gas.")
+            time.sleep(1) # Se c'è un errore, respira un attimo prima del prossimo
+            
+    print(f"\n✅ RAFFICA COMPLETATA! Bersagli colpiti con successo: {success_count}/{len(targets)}")
+
 def main():
-    print(f"🚀 Sniper Online | Relayer: {RELAYER_ADDR}")
+    print(f"🚀 Sniper Engine ARMATO | Relayer: {RELAYER_ADDR}")
     w3 = get_working_w3()
+    if not w3:
+        print("❌ ERRORE: Nessun nodo risponde!"); return
+        
     acc = Account.from_key(PRIVATE_KEY)
     
-    # Caricamento munizioni
+    # 1. Caricamento Armi
     market_targets = fetch_open_market()
     final_targets = list(set([RELAYER_ADDR.lower()] + [t.lower() for t in MANUAL_TARGETS] + market_targets))
-    
     print(f"🎯 STATO CARICATORE: {len(final_targets)} wallet pronti.")
 
+    # 2. La Sentinella (Loop di attesa)
     while True:
         try:
-            nonce = w3.eth.get_transaction_count(acc.address)
-            print(f"⏳ Snapshot CHIUSO | Nonce: {nonce} | Bersagli: {len(final_targets)} | Riprovo tra 60s")
-            time.sleep(60)
-        except:
+            if is_snapshot_open(w3, acc, final_targets[0]):
+                print("🟢 SEGNALE VERDE: Lo Snapshot è APERTO!")
+                # 3. Fuoco!
+                fire_volley(w3, acc, final_targets)
+                break # Una volta sparato, il bot esce e si spegne
+            else:
+                print(f"⏳ Snapshot CHIUSO | In attesa del via libera... Riprovo tra 30s")
+                time.sleep(30)
+                
+        except Exception as e:
+            print(f"🔄 Nodo instabile, ricollegamento...")
             w3 = get_working_w3()
             time.sleep(30)
 
