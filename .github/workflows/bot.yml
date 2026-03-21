@@ -1,26 +1,25 @@
-name: Run Relayer Sniper
+name: VeChain Sniper Batch-Mode
 
 on:
   schedule:
-    # 06:15 UTC corrispondono alle 07:15 Italiane (ora solare)
-    # Il bot partirà 30 minuti prima dello snapshot per essere pronto
-    - cron: '15 6 * * 1' 
-  workflow_dispatch: # Ti permette di lanciarlo a mano dall'app se serve
+    # Parte alle 07:15 Italiane ogni lunedì
+    - cron: '15 6 * * 1'
+  workflow_dispatch: # Questo è il tuo pulsante di emergenza manuale
 
 jobs:
-  build:
+  sniper:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v2
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v2
         with:
-          python-python: '3.9'
+          python-version: '3.9'
 
-      - name: Install dependencies
-        run: pip install web3 requests eth-account
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
 
       - name: Run Sniper
         env:
