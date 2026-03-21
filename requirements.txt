@@ -1,3 +1,4 @@
 web3
-eth-account
 requests
+eth-account
+thor-requests
