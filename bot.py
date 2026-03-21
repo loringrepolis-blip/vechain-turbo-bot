@@ -38,13 +38,16 @@ def is_snapshot_open(connector):
         return False
 
 def main():
-    print(f"🚀 SNIPER GATLING V2.2 | Relayer: {RELAYER_ADDR}")
+    print(f"🚀 SNIPER GATLING V2.3 | Relayer: {RELAYER_ADDR}")
     if not PRIVATE_KEY:
         print("❌ ERRORE: Chiave Privata mancante!"); return
 
-    #thor-requests gestisce tutto internamente
     connector = Connect(NODE_URL)
-    wallet = Wallet.from_private_key(PRIVATE_KEY)
+    
+    # --- CORREZIONE QUI ---
+    # In questa versione della libreria, Wallet si inizializza passando la chiave
+    wallet = Wallet(PRIVATE_KEY) 
+    # ----------------------
     
     targets = fetch_targets()
     if not targets:
@@ -73,7 +76,7 @@ def main():
                 print(f"⏳ CHIUSO | In attesa... (Controllo ogni 30s)")
                 time.sleep(30)
         except Exception as e:
-            print(f"🔄 Errore connessione: {e}. Riprovo...")
+            print(f"🔄 Errore connessione o esecuzione: {e}. Riprovo...")
             time.sleep(30)
 
 if __name__ == "__main__":
