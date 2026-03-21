@@ -1,27 +1,28 @@
-name: Relayer Autovote Hunter
+name: Run Relayer Sniper
 
 on:
   schedule:
-    - cron: '45 6 * * 1'
-  workflow_dispatch:
+    # 06:15 UTC corrispondono alle 07:15 Italiane (ora solare)
+    # Il bot partirà 30 minuti prima dello snapshot per essere pronto
+    - cron: '15 6 * * 1' 
+  workflow_dispatch: # Ti permette di lanciarlo a mano dall'app se serve
 
 jobs:
-  run-relayer:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout del codice
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v2
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v2
         with:
-          python-version: '3.10'
+          python-python: '3.9'
 
-      - name: Installa le dipendenze
-        run: pip install -r requirements.txt
+      - name: Install dependencies
+        run: pip install web3 requests eth-account
 
-      - name: Avvio Caccia allo Snapshot
+      - name: Run Sniper
         env:
           VECHAIN_PRIVATE_KEY: ${{ secrets.VECHAIN_PRIVATE_KEY }}
-          PYTHONUNBUFFERED: "1"
-        run: python -u bot.py
+        run: python bot.py
