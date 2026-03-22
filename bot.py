@@ -17,7 +17,7 @@ RPC_NODES = [
 CONTRACT_DAO = "0x89A00Bb0947a30FF95BEEf77a66AEDe3842Fe5B7"
 ROUND_ID = 91 
 BATCH_SIZE = 100  # Massimo voti per singola transazione
-DRY_RUN = False   # <--- SETTARE A FALSE PER IL VOTO REALE
+DRY_RUN = True   # <--- SETTARE A FALSE PER IL VOTO REALE
 
 # =========================================================
 # 2. LISTA BERSAGLI (45 VETERANI + BALENA)
