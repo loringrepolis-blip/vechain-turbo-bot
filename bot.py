@@ -2,6 +2,8 @@ import time
 import requests
 import os
 from thor_devkit import transaction, cry, abi
+# Importiamo direttamente il modulo di crittografia corretto per Python
+from thor_devkit.cry import secp256k1
 
 # =========================================================
 # 1. CONFIGURAZIONE RPC
@@ -42,7 +44,7 @@ TARGET_VOTERS = [
     "0x155532F95117CF298CA293C7572830d48B89AE27" # LA BALENA
 ]
 
-# DETTAGLI CONTRATTO (da screenshot)
+# DETTAGLI CONTRATTO
 CONTRACT_DAO = "0x89A00Bb0947a30FF95BEEf77a66AEDe3842Fe5B7"
 ROUND_ID = 91 
 
@@ -52,12 +54,13 @@ ROUND_ID = 91
 def get_block_ref():
     try:
         res = requests.get(f"{RPC_NODES[0]}/blocks/best", timeout=5)
-        return res.json()['id'][:18]
+        # Prende i primi 18 caratteri per formare un blockRef valido in esadecimale
+        block_id = res.json()['id']
+        return block_id[:18]
     except:
         return "0x0000000000000000"
 
 def prepara_super_camion(private_key_hex):
-    # ABI Corretta
     voto_abi = abi.Function({
         "type": "function",
         "name": "castVoteOnBehalfOf",
@@ -69,7 +72,7 @@ def prepara_super_camion(private_key_hex):
         "stateMutability": "nonpayable"
     })
 
-    # PULIZIA CHIAVE (Risolve errore image_b1b184.png)
+    # PULIZIA CHIAVE (Protezione da formattazioni errate su GitHub)
     pk_clean = private_key_hex.strip()
     if pk_clean.startswith("0x"):
         pk_clean = pk_clean[2:]
@@ -78,12 +81,19 @@ def prepara_super_camion(private_key_hex):
     print(f"⚙️ Impacchettamento di {len(TARGET_VOTERS)} voti...")
     
     for voter in TARGET_VOTERS:
-        # Lowercase fix
         v_clean = voter.strip().lower()
-        # TupleEncoder fix
-        payload = "0x" + voto_abi.encode([v_clean, ROUND_ID]).hex()
+        
+        # PREDIZIONE ERRORE: L'encoder potrebbe volere i parametri separati o in lista
+        try:
+            payload_bytes = voto_abi.encode(v_clean, ROUND_ID)
+        except TypeError:
+            # Se fallisce, usa la lista (il fallback che avevamo prima)
+            payload_bytes = voto_abi.encode([v_clean, ROUND_ID])
+            
+        payload = "0x" + payload_bytes.hex()
         clauses.append({"to": CONTRACT_DAO, "value": 0, "data": payload})
 
+    # Costruzione della transazione
     tx = transaction.Transaction({
         "chainTag": 0x4a,
         "blockRef": get_block_ref(),
@@ -95,38 +105,25 @@ def prepara_super_camion(private_key_hex):
         "nonce": int(time.time())
     })
     
-    # --- FIX DEFINITIVO FIRMA (Risolve image_b15b2d.png e image_b1b8cc.png) ---
-    pk_bytes = bytes.fromhex(pk_clean)
+    # --- LA SOLUZIONE DEFINITIVA PER LA FIRMA IN PYTHON ---
+    # 1. Converti la chiave in byte puri
+    priv_key_bytes = bytes.fromhex(pk_clean)
     
-    # Proviamo a trovare la classe PrivateKey in modo dinamico
-    pk_found = False
+    # 2. Ottieni l'hash di firma della transazione
+    message_hash = tx.get_signing_hash()
     
-    # Tentativo 1: thor_devkit.cry.secp256k1.PrivateKey
-    if hasattr(cry, 'secp256k1') and hasattr(cry.secp256k1, 'PrivateKey'):
-        tx.sign(cry.secp256k1.PrivateKey(pk_bytes))
-        pk_found = True
-    # Tentativo 2: thor_devkit.cry.PrivateKey
-    elif hasattr(cry, 'PrivateKey'):
-        tx.sign(cry.PrivateKey(pk_bytes))
-        pk_found = True
-    # Tentativo 3: Importazione diretta via secp256k1
-    else:
-        try:
-            from thor_devkit.cry import secp256k1
-            tx.sign(secp256k1.PrivateKey(pk_bytes))
-            pk_found = True
-        except:
-            pass
-            
-    if not pk_found:
-        raise AttributeError("Impossibile trovare la classe PrivateKey nella libreria. Verifica l'installazione.")
+    # 3. Firma crittograficamente l'hash 
+    signature = secp256k1.sign(message_hash, priv_key_bytes)
+    
+    # 4. Inietta manualmente la firma nella transazione
+    tx.set_signature(signature)
     
     return tx
 
 def lancia_sniper(tx, dry_run=True):
     raw_tx = "0x" + tx.encode().hex()
     if dry_run:
-        print("🧪 MODALITÀ TEST: Il camion è pronto!")
+        print("🧪 MODALITÀ TEST: Firma avvenuta correttamente! Il camion è pronto.")
         return {"status": "Simulazione completata con successo."}
 
     for nodo in RPC_NODES:
@@ -145,7 +142,7 @@ if __name__ == "__main__":
         print("🔑 Chiave 'VECHAIN_PRIVATE_KEY' rilevata correttamente.")
         try:
             camion = prepara_super_camion(pk)
-            # Ancora in modalità TEST
+            # Continuiamo a testare senza spendere gas
             risultato = lancia_sniper(camion, dry_run=True)
             print(f"✅ RISULTATO: {risultato}")
         except Exception as e:
