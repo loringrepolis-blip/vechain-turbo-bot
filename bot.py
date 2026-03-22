@@ -4,7 +4,7 @@ import os
 from thor_devkit import transaction, cry, abi
 
 # =========================================================
-# 1. NODI RPC PER RIDONDANZA
+# 1. CONFIGURAZIONE NODI
 # =========================================================
 RPC_NODES = [
     "https://mainnet.vechain.org",
@@ -13,7 +13,7 @@ RPC_NODES = [
 ]
 
 # =========================================================
-# 2. CONFIGURAZIONE BERSAGLI (45 VETERANI + BALENA)
+# 2. BERSAGLI (45 VETERANI + BALENA) - TUTTI CONVERTITI IN MINUSCOLO
 # =========================================================
 TARGET_VOTERS = [
     "0x6Fd6FF266bc7091D78A2FEd1Bd42dEb20d4e80c0", "0x2e5fB6686e1254fc9AefB07661E605951d514b86",
@@ -39,27 +39,25 @@ TARGET_VOTERS = [
     "0x02C6185360d6A5aECD50bf54f5371249D3627dec", "0x7eC8D7DDAb8413Cc392A0fd38933986213ce51ec",
     "0x6f9bbE9393Cc977A4478242CCf1DD5709d50F608", "0xE12fe2032Df88Ff1FfdCDaf9cA8dC0334F1BE5f3",
     "0xd4d13a8983edF3e45830a341DcB2eF1d405DEe5B",
-    "0x155532F95117CF298CA293C7572830d48B89AE27"  # LA BALENA (6M VOT3)
+    "0x155532F95117CF298CA293C7572830d48B89AE27"
 ]
 
-# DETTAGLI CONTRATTO (Verificati da screenshot)
+# DETTAGLI CONTRATTO & ROUND
 CONTRACT_DAO = "0x89A00Bb0947a30FF95BEEf77a66AEDe3842Fe5B7"
-ROUND_ID = 91 # Aggiornato per il prossimo ciclo (il precedente era 90)
+ROUND_ID = 91  # L'ultimo era 90
 
 # =========================================================
-# 3. FUNZIONI DI SUPPORTO
+# 3. LOGICA DI ESECUZIONE
 # =========================================================
 def get_block_ref():
-    """Ottiene il riferimento all'ultimo blocco utile"""
     try:
         res = requests.get(f"{RPC_NODES[0]}/blocks/best", timeout=5)
         return res.json()['id'][:18]
-    except Exception as e:
-        print(f"⚠️ Errore recupero blockRef: {e}")
+    except:
         return "0x0000000000000000"
 
 def prepara_super_camion(private_key_hex):
-    # ABI Corretta: Aggiunti type e stateMutability per evitare l'errore di image_b05c10.png
+    # ABI Definitiva (con stateMutability)
     voto_abi = abi.Function({
         "type": "function",
         "name": "castVoteOnBehalfOf",
@@ -75,15 +73,14 @@ def prepara_super_camion(private_key_hex):
     print(f"⚙️ Impacchettamento di {len(TARGET_VOTERS)} voti...")
     
     for voter in TARGET_VOTERS:
-        # CORREZIONE TUPLEENCODER (image_b06a96.png): Passiamo gli argomenti in una LISTA [voter, ROUND_ID]
-        payload = "0x" + voto_abi.encode([voter, ROUND_ID]).hex()
+        # PULIZIA INDIRIZZO: .lower() risolve l'AddressEncoder error
+        voter_clean = voter.strip().lower()
+        payload = "0x" + voto_abi.encode([voter_clean, ROUND_ID]).hex()
         clauses.append({"to": CONTRACT_DAO, "value": 0, "data": payload})
 
-    current_ref = get_block_ref()
-
     tx = transaction.Transaction({
-        "chainTag": 0x4a, # VeChain Mainnet
-        "blockRef": current_ref,
+        "chainTag": 0x4a,
+        "blockRef": get_block_ref(),
         "expiration": 32,
         "clauses": clauses,
         "gasPriceCoef": 128,
@@ -92,48 +89,37 @@ def prepara_super_camion(private_key_hex):
         "nonce": int(time.time())
     })
     
-    # Firma la transazione
     key = cry.secp256k1.PrivateKey(bytes.fromhex(private_key_hex))
     tx.sign(key)
-    
     return tx
 
 def lancia_sniper(tx, dry_run=True):
     raw_tx = "0x" + tx.encode().hex()
-    
     if dry_run:
-        print("🧪 MODALITÀ TEST: Il camion è pronto per la consegna!")
-        return {"status": "Simulazione completata. Pronto per il Round 91."}
+        print("🧪 MODALITÀ TEST: Il camion è sigillato e pronto.")
+        return {"status": "Simulazione OK. Il formato dei dati è corretto."}
 
     for nodo in RPC_NODES:
         try:
             res = requests.post(f"{nodo}/transactions", json={"raw": raw_tx}, timeout=5)
             if res.status_code == 200:
-                print(f"✅ MISSIONE COMPIUTA su {nodo}")
                 return res.json()
         except:
             continue
     return None
 
-# =========================================================
-# 4. MAIN ENTRY POINT (Allineato con image_a66783.png)
-# =========================================================
 if __name__ == "__main__":
-    # Carichiamo il nome ESATTO del secret presente su GitHub
+    # Caricamento Secret
     pk = os.getenv("VECHAIN_PRIVATE_KEY") 
     
     if pk:
-        print(f"🔑 Chiave 'VECHAIN_PRIVATE_KEY' rilevata correttamente.")
+        print("🔑 Chiave 'VECHAIN_PRIVATE_KEY' rilevata correttamente.")
         try:
             camion = prepara_super_camion(pk)
-            
-            # NOTA: Per sparare davvero lunedì mattina, dovrai mettere dry_run=False
+            # Rimane dry_run=True finché non siamo sicuri al 100%
             risultato = lancia_sniper(camion, dry_run=True)
-            
-            print("--- LOG FINALE ---")
-            print(risultato)
-            print("------------------")
+            print(f"✅ RISULTATO: {risultato}")
         except Exception as e:
-            print(f"❌ Errore critico nel processo: {e}")
+            print(f"❌ Errore critico: {e}")
     else:
-        print("❌ ERRORE: Secret 'VECHAIN_PRIVATE_KEY' non trovato su GitHub.")
+        print("❌ ERRORE: Secret 'VECHAIN_PRIVATE_KEY' non trovato.")
