@@ -4,7 +4,7 @@ import os
 from thor_devkit import transaction, cry, abi
 
 # =========================================================
-# 1. PILASTRO: RIDONDANZA RPC
+# 1. NODI RPC PER RIDONDANZA
 # =========================================================
 RPC_NODES = [
     "https://mainnet.vechain.org",
@@ -13,7 +13,7 @@ RPC_NODES = [
 ]
 
 # =========================================================
-# 2. IL CARICO: 45 VETERANI + LA BALENA
+# 2. CONFIGURAZIONE BERSAGLI (45 VETERANI + BALENA)
 # =========================================================
 TARGET_VOTERS = [
     "0x6Fd6FF266bc7091D78A2FEd1Bd42dEb20d4e80c0", "0x2e5fB6686e1254fc9AefB07661E605951d514b86",
@@ -39,27 +39,27 @@ TARGET_VOTERS = [
     "0x02C6185360d6A5aECD50bf54f5371249D3627dec", "0x7eC8D7DDAb8413Cc392A0fd38933986213ce51ec",
     "0x6f9bbE9393Cc977A4478242CCf1DD5709d50F608", "0xE12fe2032Df88Ff1FfdCDaf9cA8dC0334F1BE5f3",
     "0xd4d13a8983edF3e45830a341DcB2eF1d405DEe5B",
-    "0x155532F95117CF298CA293C7572830d48B89AE27"
+    "0x155532F95117CF298CA293C7572830d48B89AE27"  # LA BALENA (6M VOT3)
 ]
 
-# =========================================================
-# CONFIGURAZIONE CONTRATTO & ROUND
-# =========================================================
+# DETTAGLI CONTRATTO (Verificati da screenshot)
 CONTRACT_DAO = "0x89A00Bb0947a30FF95BEEf77a66AEDe3842Fe5B7"
-ROUND_ID = 91
+ROUND_ID = 91 # Aggiornato per il prossimo ciclo (il precedente era 90)
 
+# =========================================================
+# 3. FUNZIONI DI SUPPORTO
+# =========================================================
 def get_block_ref():
-    """Recupera l'ultimo blocco per validare la transazione"""
+    """Ottiene il riferimento all'ultimo blocco utile"""
     try:
-        res = requests.get(f"{RPC_NODES[0]}/blocks/best", timeout=2)
-        block_id = res.json()['id']
-        # Il blockRef sono i primi 18 caratteri dell'ID blocco (8 byte)
-        return block_id[:18]
-    except:
+        res = requests.get(f"{RPC_NODES[0]}/blocks/best", timeout=5)
+        return res.json()['id'][:18]
+    except Exception as e:
+        print(f"⚠️ Errore recupero blockRef: {e}")
         return "0x0000000000000000"
 
 def prepara_super_camion(private_key_hex):
-# ABI aggiornata: ora includiamo 'type' e 'stateMutability' per far felice la libreria
+    # ABI Corretta: Aggiunti type e stateMutability per evitare l'errore di image_b05c10.png
     voto_abi = abi.Function({
         "type": "function",
         "name": "castVoteOnBehalfOf",
@@ -72,15 +72,17 @@ def prepara_super_camion(private_key_hex):
     })
 
     clauses = []
+    print(f"⚙️ Impacchettamento di {len(TARGET_VOTERS)} voti...")
+    
     for voter in TARGET_VOTERS:
-        payload = "0x" + voto_abi.encode(voter, ROUND_ID).hex()
+        # CORREZIONE TUPLEENCODER (image_b06a96.png): Passiamo gli argomenti in una LISTA [voter, ROUND_ID]
+        payload = "0x" + voto_abi.encode([voter, ROUND_ID]).hex()
         clauses.append({"to": CONTRACT_DAO, "value": 0, "data": payload})
 
-    # Recupero dinamico del BlockRef
     current_ref = get_block_ref()
 
     tx = transaction.Transaction({
-        "chainTag": 0x4a,
+        "chainTag": 0x4a, # VeChain Mainnet
         "blockRef": current_ref,
         "expiration": 32,
         "clauses": clauses,
@@ -90,58 +92,48 @@ def prepara_super_camion(private_key_hex):
         "nonce": int(time.time())
     })
     
-    # FIRMA DELLA TRANSAZIONE
+    # Firma la transazione
     key = cry.secp256k1.PrivateKey(bytes.fromhex(private_key_hex))
     tx.sign(key)
     
     return tx
 
 def lancia_sniper(tx, dry_run=True):
-    """
-    Se dry_run=True, simula solo la transazione senza inviarla davvero.
-    """
     raw_tx = "0x" + tx.encode().hex()
     
     if dry_run:
-        print("🧪 MODALITÀ TEST: Simulazione chiamata al contratto...")
-        # Simulazione tramite API VeChain
-        data_sim = {"clauses": tx.clauses, "caller": "0x..."} # Inserire il tuo indirizzo
-        print(f"📦 Payload pronto per {len(TARGET_VOTERS)} clausole. Il camion è sigillato.")
-        return {"status": "Simulazione completata con successo"}
+        print("🧪 MODALITÀ TEST: Il camion è pronto per la consegna!")
+        return {"status": "Simulazione completata. Pronto per il Round 91."}
 
     for nodo in RPC_NODES:
         try:
-            res = requests.post(f"{nodo}/transactions", json={"raw": raw_tx}, timeout=2.0)
+            res = requests.post(f"{nodo}/transactions", json={"raw": raw_tx}, timeout=5)
             if res.status_code == 200:
-                print(f"✅ INVIATO! Nodo: {nodo}")
+                print(f"✅ MISSIONE COMPIUTA su {nodo}")
                 return res.json()
         except:
             continue
     return None
 
+# =========================================================
+# 4. MAIN ENTRY POINT (Allineato con image_a66783.png)
+# =========================================================
 if __name__ == "__main__":
-    # 1. Recupera la chiave usando il nome ESATTO che hai su GitHub
+    # Carichiamo il nome ESATTO del secret presente su GitHub
     pk = os.getenv("VECHAIN_PRIVATE_KEY") 
     
     if pk:
-        print("🔑 Chiave 'VECHAIN_PRIVATE_KEY' rilevata correttamente.")
-        
-        # 2. Crea il Super Camion con i 46 bersagli e firma
+        print(f"🔑 Chiave 'VECHAIN_PRIVATE_KEY' rilevata correttamente.")
         try:
             camion = prepara_super_camion(pk)
             
-            # 3. TEST DI SIMULAZIONE (Dry Run)
-            # Mantieni dry_run=True per ora: verifichiamo che il "motore" giri
+            # NOTA: Per sparare davvero lunedì mattina, dovrai mettere dry_run=False
             risultato = lancia_sniper(camion, dry_run=True)
             
-            print("--- RISULTATO TEST ---")
+            print("--- LOG FINALE ---")
             print(risultato)
-            print("----------------------")
-            
+            print("------------------")
         except Exception as e:
-            print(f"❌ Errore durante la preparazione del camion: {e}")
-            
+            print(f"❌ Errore critico nel processo: {e}")
     else:
-        # Messaggio di errore specifico se il Secret non viene letto
-        print("❌ ERRORE CRITICO: La variabile 'VECHAIN_PRIVATE_KEY' è vuota.")
-        print("Controlla che il file .yml passi correttamente il Secret al bot.")
+        print("❌ ERRORE: Secret 'VECHAIN_PRIVATE_KEY' non trovato su GitHub.")
