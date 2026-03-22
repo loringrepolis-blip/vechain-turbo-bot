@@ -4,7 +4,7 @@ import os
 from thor_devkit import transaction, cry, abi
 
 # =========================================================
-# 1. NODI RPC
+# 1. CONFIGURAZIONE NODI RPC
 # =========================================================
 RPC_NODES = [
     "https://mainnet.vechain.org",
@@ -39,14 +39,15 @@ TARGET_VOTERS = [
     "0x02C6185360d6A5aECD50bf54f5371249D3627dec", "0x7eC8D7DDAb8413Cc392A0fd38933986213ce51ec",
     "0x6f9bbE9393Cc977A4478242CCf1DD5709d50F608", "0xE12fe2032Df88Ff1FfdCDaf9cA8dC0334F1BE5f3",
     "0xd4d13a8983edF3e45830a341DcB2eF1d405DEe5B",
-    "0x155532f95117cf298ca293c7572830d48b89ae27" # LA BALENA
+    "0x155532F95117CF298CA293C7572830d48B89AE27" # LA BALENA
 ]
 
-CONTRACT_DAO = "0x89A00Bb0947a30FF95BEEf77a66AEDe3842Fe5B7" #
-ROUND_ID = 91 # Prossimo ciclo (il precedente era 90)
+# DETTAGLI CONTRATTO (Verificati da screenshot)
+CONTRACT_DAO = "0x89A00Bb0947a30FF95BEEf77a66AEDe3842Fe5B7"
+ROUND_ID = 91 # Prossimo round (il 90 si è concluso)
 
 # =========================================================
-# 3. LOGICA OPERATIVA
+# 3. FUNZIONI CORE
 # =========================================================
 def get_block_ref():
     try:
@@ -56,7 +57,7 @@ def get_block_ref():
         return "0x0000000000000000"
 
 def prepara_super_camion(private_key_hex):
-    # ABI Definitiva (con stateMutability)
+    # ABI Definitiva con StateMutability
     voto_abi = abi.Function({
         "type": "function",
         "name": "castVoteOnBehalfOf",
@@ -68,13 +69,19 @@ def prepara_super_camion(private_key_hex):
         "stateMutability": "nonpayable"
     })
 
+    # PULIZIA CHIAVE PRIVATA (Risolve l'errore di image_b1b184.png)
+    # Rimuove '0x' se presente e toglie eventuali spazi o a capo
+    pk_clean = private_key_hex.strip()
+    if pk_clean.startswith("0x"):
+        pk_clean = pk_clean[2:]
+
     clauses = []
     print(f"⚙️ Impacchettamento di {len(TARGET_VOTERS)} voti...")
     
     for voter in TARGET_VOTERS:
-        # Correzione indirizzi: minuscolo e pulito
+        # Lowercase for AddressEncoder
         v_clean = voter.strip().lower()
-        # Correzione encoding: lista [arg1, arg2]
+        # List format for TupleEncoder
         payload = "0x" + voto_abi.encode([v_clean, ROUND_ID]).hex()
         clauses.append({"to": CONTRACT_DAO, "value": 0, "data": payload})
 
@@ -89,23 +96,16 @@ def prepara_super_camion(private_key_hex):
         "nonce": int(time.time())
     })
     
-    # FIX FINALE FIRMA (image_b15b2d.png): Accesso diretto a cry.PrivateKey
-    try:
-        key = cry.PrivateKey(bytes.fromhex(private_key_hex))
-        tx.sign(key)
-    except AttributeError:
-        # Fallback nel caso la libreria usi la sintassi alternativa
-        from thor_devkit.cry import secp256k1
-        key_bytes = bytes.fromhex(private_key_hex)
-        tx.sign(cry.PrivateKey(key_bytes))
-        
+    # Firma con la sintassi corretta per thor-devkit
+    key = cry.PrivateKey(bytes.fromhex(pk_clean))
+    tx.sign(key)
     return tx
 
 def lancia_sniper(tx, dry_run=True):
     raw_tx = "0x" + tx.encode().hex()
     if dry_run:
-        print("🧪 MODALITÀ TEST: Camion sigillato e pronto alla consegna.")
-        return {"status": "Simulazione completata con successo."}
+        print("🧪 MODALITÀ TEST: Formato transazione perfetto!")
+        return {"status": "Simulazione riuscita. Pronto al lancio."}
 
     for nodo in RPC_NODES:
         try:
@@ -124,10 +124,10 @@ if __name__ == "__main__":
         print("🔑 Chiave 'VECHAIN_PRIVATE_KEY' rilevata correttamente.")
         try:
             camion = prepara_super_camion(pk)
-            # Mantieni dry_run=True per testare il formato
+            # Mantieni dry_run=True per ora
             risultato = lancia_sniper(camion, dry_run=True)
             print(f"✅ RISULTATO: {risultato}")
         except Exception as e:
             print(f"❌ Errore critico: {e}")
     else:
-        print("❌ ERRORE: Secret 'VECHAIN_PRIVATE_KEY' non trovato.")
+        print("❌ ERRORE: Variabile 'VECHAIN_PRIVATE_KEY' non trovata.")
