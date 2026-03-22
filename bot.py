@@ -1,8 +1,7 @@
 import time
 import requests
 import os
-from thor_devkit import transaction, cry, abi
-# Importiamo direttamente il modulo di crittografia corretto per Python
+from thor_devkit import transaction, abi
 from thor_devkit.cry import secp256k1
 
 # =========================================================
@@ -54,11 +53,50 @@ ROUND_ID = 91
 def get_block_ref():
     try:
         res = requests.get(f"{RPC_NODES[0]}/blocks/best", timeout=5)
-        # Prende i primi 18 caratteri per formare un blockRef valido in esadecimale
-        block_id = res.json()['id']
-        return block_id[:18]
+        return res.json()['id'][:18]
     except:
         return "0x0000000000000000"
+
+def codifica_voto_infallibile(voto_abi, voter, round_id):
+    """
+    MATRICE BRUTE-FORCE: Prova tutte le combinazioni possibili di argomenti 
+    e checksum per bypassare le rigidità di eth_abi.
+    """
+    v_orig = voter.strip()
+    v_lower = v_orig.lower()
+    
+    # 1. Tenta di generare il checksum corretto (spesso richiesto da eth_abi)
+    try:
+        from eth_utils import to_checksum_address
+        v_check = to_checksum_address(v_lower)
+    except Exception:
+        v_check = v_orig
+        
+    # Testiamo in ordine di sicurezza: Checksum, Lowercase, Originale
+    for addr in [v_check, v_lower, v_orig]:
+        
+        # Testiamo tutte le possibili architetture richieste da thor-devkit in python
+        tentativi = [
+            lambda a, r: voto_abi.encode(a, r),                         # Argomenti posizionali
+            lambda a, r: voto_abi.encode([a, r]),                       # Lista
+            lambda a, r: voto_abi.encode((a, r)),                       # Tupla
+            lambda a, r: voto_abi.encode({"voter": a, "roundId": r})    # Dizionario
+        ]
+        
+        for tentativo in tentativi:
+            try:
+                # Intercettiamo QUALSIASI errore silenziosamente e passiamo al prossimo
+                risultato = tentativo(addr, round_id)
+                
+                # Se passa, formattiamo l'output
+                if isinstance(risultato, bytes):
+                    return "0x" + risultato.hex()
+                elif isinstance(risultato, str):
+                    return "0x" + risultato if not risultato.startswith("0x") else risultato
+            except Exception:
+                continue
+                
+    raise RuntimeError(f"Nessuna combinazione di encoding ha funzionato per l'indirizzo: {v_orig}")
 
 def prepara_super_camion(private_key_hex):
     voto_abi = abi.Function({
@@ -72,7 +110,6 @@ def prepara_super_camion(private_key_hex):
         "stateMutability": "nonpayable"
     })
 
-    # PULIZIA CHIAVE (Protezione da formattazioni errate su GitHub)
     pk_clean = private_key_hex.strip()
     if pk_clean.startswith("0x"):
         pk_clean = pk_clean[2:]
@@ -81,19 +118,9 @@ def prepara_super_camion(private_key_hex):
     print(f"⚙️ Impacchettamento di {len(TARGET_VOTERS)} voti...")
     
     for voter in TARGET_VOTERS:
-        v_clean = voter.strip().lower()
-        
-        # PREDIZIONE ERRORE: L'encoder potrebbe volere i parametri separati o in lista
-        try:
-            payload_bytes = voto_abi.encode(v_clean, ROUND_ID)
-        except TypeError:
-            # Se fallisce, usa la lista (il fallback che avevamo prima)
-            payload_bytes = voto_abi.encode([v_clean, ROUND_ID])
-            
-        payload = "0x" + payload_bytes.hex()
+        payload = codifica_voto_infallibile(voto_abi, voter, ROUND_ID)
         clauses.append({"to": CONTRACT_DAO, "value": 0, "data": payload})
 
-    # Costruzione della transazione
     tx = transaction.Transaction({
         "chainTag": 0x4a,
         "blockRef": get_block_ref(),
@@ -105,17 +132,10 @@ def prepara_super_camion(private_key_hex):
         "nonce": int(time.time())
     })
     
-    # --- LA SOLUZIONE DEFINITIVA PER LA FIRMA IN PYTHON ---
-    # 1. Converti la chiave in byte puri
+    # Firma resiliente
     priv_key_bytes = bytes.fromhex(pk_clean)
-    
-    # 2. Ottieni l'hash di firma della transazione
     message_hash = tx.get_signing_hash()
-    
-    # 3. Firma crittograficamente l'hash 
     signature = secp256k1.sign(message_hash, priv_key_bytes)
-    
-    # 4. Inietta manualmente la firma nella transazione
     tx.set_signature(signature)
     
     return tx
@@ -123,7 +143,7 @@ def prepara_super_camion(private_key_hex):
 def lancia_sniper(tx, dry_run=True):
     raw_tx = "0x" + tx.encode().hex()
     if dry_run:
-        print("🧪 MODALITÀ TEST: Firma avvenuta correttamente! Il camion è pronto.")
+        print("🧪 MODALITÀ TEST: Firma e Pacchetti completati! Il camion è pronto.")
         return {"status": "Simulazione completata con successo."}
 
     for nodo in RPC_NODES:
@@ -142,10 +162,11 @@ if __name__ == "__main__":
         print("🔑 Chiave 'VECHAIN_PRIVATE_KEY' rilevata correttamente.")
         try:
             camion = prepara_super_camion(pk)
-            # Continuiamo a testare senza spendere gas
             risultato = lancia_sniper(camion, dry_run=True)
             print(f"✅ RISULTATO: {risultato}")
         except Exception as e:
+            import traceback
             print(f"❌ Errore critico nel processo: {e}")
+            traceback.print_exc()
     else:
         print("❌ ERRORE: Secret 'VECHAIN_PRIVATE_KEY' non trovato.")
