@@ -59,12 +59,16 @@ def get_block_ref():
         return "0x0000000000000000"
 
 def prepara_super_camion(private_key_hex):
+# ABI aggiornata: ora includiamo 'type' e 'stateMutability' per far felice la libreria
     voto_abi = abi.Function({
+        "type": "function",
         "name": "castVoteOnBehalfOf",
         "inputs": [
             {"type": "address", "name": "voter"},
             {"type": "uint256", "name": "roundId"}
-        ]
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
     })
 
     clauses = []
