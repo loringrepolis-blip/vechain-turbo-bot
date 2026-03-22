@@ -4,7 +4,7 @@ import os
 from thor_devkit import transaction, cry, abi
 
 # =========================================================
-# 1. CONFIGURAZIONE NODI RPC
+# 1. CONFIGURAZIONE RPC
 # =========================================================
 RPC_NODES = [
     "https://mainnet.vechain.org",
@@ -13,7 +13,7 @@ RPC_NODES = [
 ]
 
 # =========================================================
-# 2. BERSAGLI (45 VETERANI + LA BALENA)
+# 2. BERSAGLI (45 VETERANI + BALENA)
 # =========================================================
 TARGET_VOTERS = [
     "0x6Fd6FF266bc7091D78A2FEd1Bd42dEb20d4e80c0", "0x2e5fB6686e1254fc9AefB07661E605951d514b86",
@@ -42,12 +42,12 @@ TARGET_VOTERS = [
     "0x155532F95117CF298CA293C7572830d48B89AE27" # LA BALENA
 ]
 
-# DETTAGLI CONTRATTO (Verificati da screenshot)
+# DETTAGLI CONTRATTO (da screenshot)
 CONTRACT_DAO = "0x89A00Bb0947a30FF95BEEf77a66AEDe3842Fe5B7"
-ROUND_ID = 91 # Prossimo round (il 90 si è concluso)
+ROUND_ID = 91 
 
 # =========================================================
-# 3. FUNZIONI CORE
+# 3. LOGICA PRINCIPALE
 # =========================================================
 def get_block_ref():
     try:
@@ -57,7 +57,7 @@ def get_block_ref():
         return "0x0000000000000000"
 
 def prepara_super_camion(private_key_hex):
-    # ABI Definitiva con StateMutability
+    # ABI Corretta
     voto_abi = abi.Function({
         "type": "function",
         "name": "castVoteOnBehalfOf",
@@ -69,8 +69,7 @@ def prepara_super_camion(private_key_hex):
         "stateMutability": "nonpayable"
     })
 
-    # PULIZIA CHIAVE PRIVATA (Risolve l'errore di image_b1b184.png)
-    # Rimuove '0x' se presente e toglie eventuali spazi o a capo
+    # PULIZIA CHIAVE (Risolve errore image_b1b184.png)
     pk_clean = private_key_hex.strip()
     if pk_clean.startswith("0x"):
         pk_clean = pk_clean[2:]
@@ -79,9 +78,9 @@ def prepara_super_camion(private_key_hex):
     print(f"⚙️ Impacchettamento di {len(TARGET_VOTERS)} voti...")
     
     for voter in TARGET_VOTERS:
-        # Lowercase for AddressEncoder
+        # Lowercase fix
         v_clean = voter.strip().lower()
-        # List format for TupleEncoder
+        # TupleEncoder fix
         payload = "0x" + voto_abi.encode([v_clean, ROUND_ID]).hex()
         clauses.append({"to": CONTRACT_DAO, "value": 0, "data": payload})
 
@@ -96,16 +95,39 @@ def prepara_super_camion(private_key_hex):
         "nonce": int(time.time())
     })
     
-    # Firma con la sintassi corretta per thor-devkit
-    key = cry.PrivateKey(bytes.fromhex(pk_clean))
-    tx.sign(key)
+    # --- FIX DEFINITIVO FIRMA (Risolve image_b15b2d.png e image_b1b8cc.png) ---
+    pk_bytes = bytes.fromhex(pk_clean)
+    
+    # Proviamo a trovare la classe PrivateKey in modo dinamico
+    pk_found = False
+    
+    # Tentativo 1: thor_devkit.cry.secp256k1.PrivateKey
+    if hasattr(cry, 'secp256k1') and hasattr(cry.secp256k1, 'PrivateKey'):
+        tx.sign(cry.secp256k1.PrivateKey(pk_bytes))
+        pk_found = True
+    # Tentativo 2: thor_devkit.cry.PrivateKey
+    elif hasattr(cry, 'PrivateKey'):
+        tx.sign(cry.PrivateKey(pk_bytes))
+        pk_found = True
+    # Tentativo 3: Importazione diretta via secp256k1
+    else:
+        try:
+            from thor_devkit.cry import secp256k1
+            tx.sign(secp256k1.PrivateKey(pk_bytes))
+            pk_found = True
+        except:
+            pass
+            
+    if not pk_found:
+        raise AttributeError("Impossibile trovare la classe PrivateKey nella libreria. Verifica l'installazione.")
+    
     return tx
 
 def lancia_sniper(tx, dry_run=True):
     raw_tx = "0x" + tx.encode().hex()
     if dry_run:
-        print("🧪 MODALITÀ TEST: Formato transazione perfetto!")
-        return {"status": "Simulazione riuscita. Pronto al lancio."}
+        print("🧪 MODALITÀ TEST: Il camion è pronto!")
+        return {"status": "Simulazione completata con successo."}
 
     for nodo in RPC_NODES:
         try:
@@ -117,17 +139,16 @@ def lancia_sniper(tx, dry_run=True):
     return None
 
 if __name__ == "__main__":
-    # Caricamento Secret
     pk = os.getenv("VECHAIN_PRIVATE_KEY") 
     
     if pk:
         print("🔑 Chiave 'VECHAIN_PRIVATE_KEY' rilevata correttamente.")
         try:
             camion = prepara_super_camion(pk)
-            # Mantieni dry_run=True per ora
+            # Ancora in modalità TEST
             risultato = lancia_sniper(camion, dry_run=True)
             print(f"✅ RISULTATO: {risultato}")
         except Exception as e:
-            print(f"❌ Errore critico: {e}")
+            print(f"❌ Errore critico nel processo: {e}")
     else:
-        print("❌ ERRORE: Variabile 'VECHAIN_PRIVATE_KEY' non trovata.")
+        print("❌ ERRORE: Secret 'VECHAIN_PRIVATE_KEY' non trovato.")
