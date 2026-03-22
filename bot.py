@@ -6,7 +6,7 @@ from thor_devkit.cry import secp256k1
 from eth_utils import to_checksum_address
 
 # =========================================================
-# 1. CONFIGURAZIONE OPERATIVA
+# 1. CONFIGURAZIONE RPC (RIDONDANZA)
 # =========================================================
 RPC_NODES = [
     "https://mainnet.vechain.org",
@@ -14,13 +14,8 @@ RPC_NODES = [
     "https://sync-mainnet.vechain.org"
 ]
 
-CONTRACT_DAO = "0x89A00Bb0947a30FF95BEEf77a66AEDe3842Fe5B7"
-ROUND_ID = 91 
-BATCH_SIZE = 100  # Massimo voti per singola transazione
-DRY_RUN = True   # <--- SETTARE A FALSE PER IL VOTO REALE
-
 # =========================================================
-# 2. LISTA BERSAGLI (45 VETERANI + BALENA)
+# 2. BERSAGLI (45 VETERANI + BALENA)
 # =========================================================
 TARGET_VOTERS = [
     "0x6Fd6FF266bc7091D78A2FEd1Bd42dEb20d4e80c0", "0x2e5fB6686e1254fc9AefB07661E605951d514b86",
@@ -49,23 +44,29 @@ TARGET_VOTERS = [
     "0x155532F95117CF298CA293C7572830d48B89AE27" # LA BALENA
 ]
 
+CONTRACT_DAO = "0x89A00Bb0947a30FF95BEEf77a66AEDe3842Fe5B7"
+ROUND_ID = 91 
+DRY_RUN = False # <--- CAMBIARE IN FALSE PER DOMATTINA
+
 # =========================================================
-# 3. MOTORE LOGICO (PIPILINE PRE-CALCOLO)
+# 3. LOGICA DI SUPPORTO (DALLA VERSIONE TEST FUNZIONANTE)
 # =========================================================
 
-def get_best_block_ref():
-    """Ottiene il blockRef ridondante provando diversi nodi."""
-    for nodo in RPC_NODES:
+def get_block_ref():
+    for node in RPC_NODES:
         try:
-            res = requests.get(f"{nodo}/blocks/best", timeout=2)
-            if res.status_code == 200:
-                return res.json()['id'][:18]
+            res = requests.get(f"{node}/blocks/best", timeout=5)
+            return res.json()['id'][:18]
         except:
             continue
-    return None
+    return "0x0000000000000000"
 
-def pre_codifica_clausole(voters, round_id):
-    """Pre-calcola le clausole ABI per massimizzare la velocità."""
+def codifica_voto_infallibile(voto_abi, voter, round_id):
+    v_clean = to_checksum_address(voter.strip().lower())
+    # Usiamo la lista, che ha dimostrato di funzionare nel test
+    return "0x" + voto_abi.encode([v_clean, round_id]).hex()
+
+def prepara_camion(private_key_hex):
     voto_abi = abi.Function({
         "type": "function",
         "name": "castVoteOnBehalfOf",
@@ -76,84 +77,53 @@ def pre_codifica_clausole(voters, round_id):
         "outputs": [],
         "stateMutability": "nonpayable"
     })
-    
-    clauses = []
-    for v in voters:
-        # Checksum obbligatorio per evitare errori di encoding
-        addr = to_checksum_address(v.strip().lower())
-        payload = "0x" + voto_abi.encode(addr, round_id).hex()
-        clauses.append({"to": CONTRACT_DAO, "value": 0, "data": payload})
-    return clauses
 
-def invia_transazione(tx_raw):
-    """Invia la transazione in parallelo/sequenza ai nodi per ridondanza."""
-    results = []
+    pk_clean = private_key_hex.strip().replace("0x", "")
+    clauses = []
+    
+    print(f"⚙️ Impacchettamento di {len(TARGET_VOTERS)} voti...")
+    for voter in TARGET_VOTERS:
+        payload = codifica_voto_infallibile(voto_abi, voter, ROUND_ID)
+        clauses.append({"to": CONTRACT_DAO, "value": 0, "data": payload})
+
+    tx = transaction.Transaction({
+        "chainTag": 0x4a,
+        "blockRef": get_block_ref(),
+        "expiration": 32,
+        "clauses": clauses,
+        "gasPriceCoef": 128,
+        "gas": 30000 * len(clauses) + 150000,
+        "dependsOn": None,
+        "nonce": int(time.time())
+    })
+    
+    priv_key_bytes = bytes.fromhex(pk_clean)
+    tx.set_signature(secp256k1.sign(tx.get_signing_hash(), priv_key_bytes))
+    return tx
+
+def lancia_sniper(tx):
+    raw_tx = "0x" + tx.encode().hex()
+    if DRY_RUN:
+        return {"status": "Simulazione completata con successo."}
+
     for nodo in RPC_NODES:
         try:
-            res = requests.post(f"{nodo}/transactions", json={"raw": tx_raw}, timeout=3)
-            results.append(res.json())
+            res = requests.post(f"{nodo}/transactions", json={"raw": raw_tx}, timeout=5)
+            if res.status_code == 200:
+                return res.json()
         except:
             continue
-    return results
-
-# =========================================================
-# 4. ESECUZIONE BATCH
-# =========================================================
-
-def esegui_fase_operativa(private_key_hex):
-    # Pulizia chiave
-    pk_clean = private_key_hex.strip().replace("0x", "")
-    priv_key_bytes = bytes.fromhex(pk_clean)
-    
-    # Suddivisione in Batch
-    batches = [TARGET_VOTERS[i:i + BATCH_SIZE] for i in range(0, len(TARGET_VOTERS), BATCH_SIZE)]
-    print(f"🚀 Inizio Fase Operativa. Batch totali: {len(batches)}")
-
-    block_ref = get_best_block_ref()
-    if not block_ref:
-        raise RuntimeError("Impossibile connettersi ai nodi RPC per ottenere il BlockRef.")
-
-    for idx, batch in enumerate(batches):
-        print(f"📦 Preparazione Batch {idx+1}/{len(batches)} ({len(batch)} voti)...")
-        
-        clauses = pre_codifica_clausole(batch, ROUND_ID)
-        
-        # Costruzione Transazione
-        tx = transaction.Transaction({
-            "chainTag": 0x4a,
-            "blockRef": block_ref,
-            "expiration": 32,
-            "clauses": clauses,
-            "gasPriceCoef": 128,
-            "gas": 30000 * len(clauses) + 150000,
-            "dependsOn": None,
-            "nonce": int(time.time() * 1000) + idx # Nonce univoco per batch
-        })
-        
-        # Firma
-        message_hash = tx.get_signing_hash()
-        signature = secp256k1.sign(message_hash, priv_key_bytes)
-        tx.set_signature(signature)
-        
-        raw_tx = "0x" + tx.encode().hex()
-
-        if DRY_RUN:
-            print(f"🧪 SIMULAZIONE: Batch {idx+1} pronto (TX size: {len(raw_tx)} chars)")
-        else:
-            print(f"🔥 INVIO Batch {idx+1} in corso...")
-            invio = invia_transazione(raw_tx)
-            print(f"📡 Risposta nodi: {invio}")
+    return {"error": "Tutti i nodi hanno fallito l'invio."}
 
 if __name__ == "__main__":
-    pk = os.getenv("VECHAIN_PRIVATE_KEY")
-    
-    if not pk:
-        print("❌ ERRORE FATALE: Variabile d'ambiente VECHAIN_PRIVATE_KEY non trovata.")
-    else:
+    pk = os.getenv("VECHAIN_PRIVATE_KEY") 
+    if pk:
+        print("🔑 Chiave rilevata correttamente.")
         try:
-            start_time = time.time()
-            esegui_fase_operativa(pk)
-            end_time = time.time()
-            print(f"\n✅ OPERAZIONE COMPLETATA in {round(end_time - start_time, 2)} secondi.")
+            camion = prepara_camion(pk)
+            risultato = lancia_sniper(camion)
+            print(f"✅ RISULTATO: {risultato}")
         except Exception as e:
-            print(f"🚨 CRASH DURANTE L'ESECUZIONE: {e}")
+            print(f"❌ Errore critico: {e}")
+    else:
+        print("❌ ERRORE: Secret non trovato.")
