@@ -116,15 +116,28 @@ def lancia_sniper(tx, dry_run=True):
     return None
 
 if __name__ == "__main__":
-    # 1. Recupera chiave (Assicurati di averla impostata nel tuo ambiente)
-    pk = os.getenv("VECHAIN_KEY") 
+    # 1. Recupera la chiave usando il nome ESATTO che hai su GitHub
+    pk = os.getenv("VECHAIN_PRIVATE_KEY") 
     
     if pk:
-        # 2. Crea il camion firmato
-        camion = prepara_super_camion(pk)
+        print("🔑 Chiave 'VECHAIN_PRIVATE_KEY' rilevata correttamente.")
         
-        # 3. TEST DI SIMULAZIONE
-        risultato = lancia_sniper(camion, dry_run=True)
-        print(risultato)
+        # 2. Crea il Super Camion con i 46 bersagli e firma
+        try:
+            camion = prepara_super_camion(pk)
+            
+            # 3. TEST DI SIMULAZIONE (Dry Run)
+            # Mantieni dry_run=True per ora: verifichiamo che il "motore" giri
+            risultato = lancia_sniper(camion, dry_run=True)
+            
+            print("--- RISULTATO TEST ---")
+            print(risultato)
+            print("----------------------")
+            
+        except Exception as e:
+            print(f"❌ Errore durante la preparazione del camion: {e}")
+            
     else:
-        print("❌ Chiave privata non trovata nei Secrets.")
+        # Messaggio di errore specifico se il Secret non viene letto
+        print("❌ ERRORE CRITICO: La variabile 'VECHAIN_PRIVATE_KEY' è vuota.")
+        print("Controlla che il file .yml passi correttamente il Secret al bot.")
