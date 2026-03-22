@@ -3,9 +3,10 @@ import requests
 import os
 from thor_devkit import transaction, abi
 from thor_devkit.cry import secp256k1
+from eth_utils import to_checksum_address
 
 # =========================================================
-# 1. CONFIGURAZIONE RPC
+# 1. CONFIGURAZIONE OPERATIVA
 # =========================================================
 RPC_NODES = [
     "https://mainnet.vechain.org",
@@ -13,8 +14,13 @@ RPC_NODES = [
     "https://sync-mainnet.vechain.org"
 ]
 
+CONTRACT_DAO = "0x89A00Bb0947a30FF95BEEf77a66AEDe3842Fe5B7"
+ROUND_ID = 91 
+BATCH_SIZE = 100  # Massimo voti per singola transazione
+DRY_RUN = False   # <--- SETTARE A FALSE PER IL VOTO REALE
+
 # =========================================================
-# 2. BERSAGLI (45 VETERANI + BALENA)
+# 2. LISTA BERSAGLI (45 VETERANI + BALENA)
 # =========================================================
 TARGET_VOTERS = [
     "0x6Fd6FF266bc7091D78A2FEd1Bd42dEb20d4e80c0", "0x2e5fB6686e1254fc9AefB07661E605951d514b86",
@@ -43,62 +49,23 @@ TARGET_VOTERS = [
     "0x155532F95117CF298CA293C7572830d48B89AE27" # LA BALENA
 ]
 
-# DETTAGLI CONTRATTO
-CONTRACT_DAO = "0x89A00Bb0947a30FF95BEEf77a66AEDe3842Fe5B7"
-ROUND_ID = 91 
-
 # =========================================================
-# 3. LOGICA PRINCIPALE
+# 3. MOTORE LOGICO (PIPILINE PRE-CALCOLO)
 # =========================================================
-def get_block_ref():
-    try:
-        res = requests.get(f"{RPC_NODES[0]}/blocks/best", timeout=5)
-        return res.json()['id'][:18]
-    except:
-        return "0x0000000000000000"
 
-def codifica_voto_infallibile(voto_abi, voter, round_id):
-    """
-    MATRICE BRUTE-FORCE: Prova tutte le combinazioni possibili di argomenti 
-    e checksum per bypassare le rigidità di eth_abi.
-    """
-    v_orig = voter.strip()
-    v_lower = v_orig.lower()
-    
-    # 1. Tenta di generare il checksum corretto (spesso richiesto da eth_abi)
-    try:
-        from eth_utils import to_checksum_address
-        v_check = to_checksum_address(v_lower)
-    except Exception:
-        v_check = v_orig
-        
-    # Testiamo in ordine di sicurezza: Checksum, Lowercase, Originale
-    for addr in [v_check, v_lower, v_orig]:
-        
-        # Testiamo tutte le possibili architetture richieste da thor-devkit in python
-        tentativi = [
-            lambda a, r: voto_abi.encode(a, r),                         # Argomenti posizionali
-            lambda a, r: voto_abi.encode([a, r]),                       # Lista
-            lambda a, r: voto_abi.encode((a, r)),                       # Tupla
-            lambda a, r: voto_abi.encode({"voter": a, "roundId": r})    # Dizionario
-        ]
-        
-        for tentativo in tentativi:
-            try:
-                # Intercettiamo QUALSIASI errore silenziosamente e passiamo al prossimo
-                risultato = tentativo(addr, round_id)
-                
-                # Se passa, formattiamo l'output
-                if isinstance(risultato, bytes):
-                    return "0x" + risultato.hex()
-                elif isinstance(risultato, str):
-                    return "0x" + risultato if not risultato.startswith("0x") else risultato
-            except Exception:
-                continue
-                
-    raise RuntimeError(f"Nessuna combinazione di encoding ha funzionato per l'indirizzo: {v_orig}")
+def get_best_block_ref():
+    """Ottiene il blockRef ridondante provando diversi nodi."""
+    for nodo in RPC_NODES:
+        try:
+            res = requests.get(f"{nodo}/blocks/best", timeout=2)
+            if res.status_code == 200:
+                return res.json()['id'][:18]
+        except:
+            continue
+    return None
 
-def prepara_super_camion(private_key_hex):
+def pre_codifica_clausole(voters, round_id):
+    """Pre-calcola le clausole ABI per massimizzare la velocità."""
     voto_abi = abi.Function({
         "type": "function",
         "name": "castVoteOnBehalfOf",
@@ -109,64 +76,84 @@ def prepara_super_camion(private_key_hex):
         "outputs": [],
         "stateMutability": "nonpayable"
     })
-
-    pk_clean = private_key_hex.strip()
-    if pk_clean.startswith("0x"):
-        pk_clean = pk_clean[2:]
-
+    
     clauses = []
-    print(f"⚙️ Impacchettamento di {len(TARGET_VOTERS)} voti...")
-    
-    for voter in TARGET_VOTERS:
-        payload = codifica_voto_infallibile(voto_abi, voter, ROUND_ID)
+    for v in voters:
+        # Checksum obbligatorio per evitare errori di encoding
+        addr = to_checksum_address(v.strip().lower())
+        payload = "0x" + voto_abi.encode(addr, round_id).hex()
         clauses.append({"to": CONTRACT_DAO, "value": 0, "data": payload})
+    return clauses
 
-    tx = transaction.Transaction({
-        "chainTag": 0x4a,
-        "blockRef": get_block_ref(),
-        "expiration": 32,
-        "clauses": clauses,
-        "gasPriceCoef": 128,
-        "gas": 30000 * len(clauses) + 150000,
-        "dependsOn": None,
-        "nonce": int(time.time())
-    })
-    
-    # Firma resiliente
-    priv_key_bytes = bytes.fromhex(pk_clean)
-    message_hash = tx.get_signing_hash()
-    signature = secp256k1.sign(message_hash, priv_key_bytes)
-    tx.set_signature(signature)
-    
-    return tx
-
-def lancia_sniper(tx, dry_run=True):
-    raw_tx = "0x" + tx.encode().hex()
-    if dry_run:
-        print("🧪 MODALITÀ TEST: Firma e Pacchetti completati! Il camion è pronto.")
-        return {"status": "Simulazione completata con successo."}
-
+def invia_transazione(tx_raw):
+    """Invia la transazione in parallelo/sequenza ai nodi per ridondanza."""
+    results = []
     for nodo in RPC_NODES:
         try:
-            res = requests.post(f"{nodo}/transactions", json={"raw": raw_tx}, timeout=5)
-            if res.status_code == 200:
-                return res.json()
+            res = requests.post(f"{nodo}/transactions", json={"raw": tx_raw}, timeout=3)
+            results.append(res.json())
         except:
             continue
-    return None
+    return results
+
+# =========================================================
+# 4. ESECUZIONE BATCH
+# =========================================================
+
+def esegui_fase_operativa(private_key_hex):
+    # Pulizia chiave
+    pk_clean = private_key_hex.strip().replace("0x", "")
+    priv_key_bytes = bytes.fromhex(pk_clean)
+    
+    # Suddivisione in Batch
+    batches = [TARGET_VOTERS[i:i + BATCH_SIZE] for i in range(0, len(TARGET_VOTERS), BATCH_SIZE)]
+    print(f"🚀 Inizio Fase Operativa. Batch totali: {len(batches)}")
+
+    block_ref = get_best_block_ref()
+    if not block_ref:
+        raise RuntimeError("Impossibile connettersi ai nodi RPC per ottenere il BlockRef.")
+
+    for idx, batch in enumerate(batches):
+        print(f"📦 Preparazione Batch {idx+1}/{len(batches)} ({len(batch)} voti)...")
+        
+        clauses = pre_codifica_clausole(batch, ROUND_ID)
+        
+        # Costruzione Transazione
+        tx = transaction.Transaction({
+            "chainTag": 0x4a,
+            "blockRef": block_ref,
+            "expiration": 32,
+            "clauses": clauses,
+            "gasPriceCoef": 128,
+            "gas": 30000 * len(clauses) + 150000,
+            "dependsOn": None,
+            "nonce": int(time.time() * 1000) + idx # Nonce univoco per batch
+        })
+        
+        # Firma
+        message_hash = tx.get_signing_hash()
+        signature = secp256k1.sign(message_hash, priv_key_bytes)
+        tx.set_signature(signature)
+        
+        raw_tx = "0x" + tx.encode().hex()
+
+        if DRY_RUN:
+            print(f"🧪 SIMULAZIONE: Batch {idx+1} pronto (TX size: {len(raw_tx)} chars)")
+        else:
+            print(f"🔥 INVIO Batch {idx+1} in corso...")
+            invio = invia_transazione(raw_tx)
+            print(f"📡 Risposta nodi: {invio}")
 
 if __name__ == "__main__":
-    pk = os.getenv("VECHAIN_PRIVATE_KEY") 
+    pk = os.getenv("VECHAIN_PRIVATE_KEY")
     
-    if pk:
-        print("🔑 Chiave 'VECHAIN_PRIVATE_KEY' rilevata correttamente.")
-        try:
-            camion = prepara_super_camion(pk)
-            risultato = lancia_sniper(camion, dry_run=True)
-            print(f"✅ RISULTATO: {risultato}")
-        except Exception as e:
-            import traceback
-            print(f"❌ Errore critico nel processo: {e}")
-            traceback.print_exc()
+    if not pk:
+        print("❌ ERRORE FATALE: Variabile d'ambiente VECHAIN_PRIVATE_KEY non trovata.")
     else:
-        print("❌ ERRORE: Secret 'VECHAIN_PRIVATE_KEY' non trovato.")
+        try:
+            start_time = time.time()
+            esegui_fase_operativa(pk)
+            end_time = time.time()
+            print(f"\n✅ OPERAZIONE COMPLETATA in {round(end_time - start_time, 2)} secondi.")
+        except Exception as e:
+            print(f"🚨 CRASH DURANTE L'ESECUZIONE: {e}")
